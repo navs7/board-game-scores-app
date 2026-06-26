@@ -160,12 +160,20 @@ class TestGameLifecycle:
         cur = requests.get(f"{API}/game/current").json()
         totals = {p["name"]: p["totalScore"] for p in cur["players"]}
         assert totals == {"Alice": 15, "Bob": 55, "Carol": 35}
+        # per-player scores list
+        scores = {p["name"]: p["scores"] for p in cur["players"]}
+        assert scores == {"Alice": [10, 5], "Bob": [25, 30], "Carol": [15, 20]}
 
-        # next turn
-        nt = requests.post(f"{API}/game/next-turn", headers=admin_headers)
-        assert nt.status_code == 200
-        idx = nt.json()["current_turn_idx"]
-        assert idx == 1
+        # Undo Bob's last score
+        ur = requests.post(f"{API}/game/undo-score", json={"player_key": keys["Bob"]}, headers=admin_headers)
+        assert ur.status_code == 200
+        assert ur.json()["removed"] == 30
+        cur = requests.get(f"{API}/game/current").json()
+        bob = next(p for p in cur["players"] if p["name"] == "Bob")
+        assert bob["totalScore"] == 25
+        assert bob["scores"] == [25]
+        # Re-add Bob's score so Bob still wins
+        requests.post(f"{API}/game/submit-score", json={"player_key": keys["Bob"], "score": 30}, headers=admin_headers)
 
         # End game -> Bob should win
         end = requests.post(f"{API}/game/end", headers=admin_headers)
@@ -248,7 +256,7 @@ class TestGameLifecycle:
         assert rr.status_code == 200
         cur = requests.get(f"{API}/game/current").json()
         assert all(p["totalScore"] == 0 for p in cur["players"])
-        assert cur["rounds"] == []
+        assert all(p["scores"] == [] for p in cur["players"])
         # abandon -> no current game, no history added
         hist_before = len(requests.get(f"{API}/history").json())
         requests.post(f"{API}/game/abandon", headers=admin_headers)

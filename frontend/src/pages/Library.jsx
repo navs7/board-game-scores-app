@@ -45,12 +45,12 @@ export default function Library() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-5 py-10">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-10">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4 mb-6 sm:mb-8">
         <div>
           <span className="label-eyebrow flex items-center gap-2"><Books size={14} /> GAME LIBRARY</span>
-          <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tighter mt-1">All your board games</h1>
-          <p className="text-zinc-500 mt-2 max-w-xl">Track stats separately for each game. Pick one when starting a new match.</p>
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tighter mt-1">All your board games</h1>
+          <p className="text-zinc-500 mt-2 max-w-xl text-sm sm:text-base">Track stats separately for each game. Pick one when starting a new match.</p>
         </div>
       </div>
 

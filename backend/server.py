@@ -111,8 +111,6 @@ class StartGameReq(BaseModel):
     players: List[str] = []  # names
     use_teams: bool = False
     teams: List[Dict[str, Any]] = []  # [{name, player_names: [...]}]
-    enable_timer: bool = False
-    turn_duration_sec: int = 60
 
 class AddPlayerReq(BaseModel):
     name: str
@@ -121,10 +119,9 @@ class AddPlayerReq(BaseModel):
 class SubmitScoreReq(BaseModel):
     player_key: str
     score: float
-    round_num: Optional[int] = None  # if None, append a new round
 
-class NextTurnReq(BaseModel):
-    pass
+class UndoScoreReq(BaseModel):
+    player_key: str
 
 # -------------------------
 # WS manager
@@ -320,14 +317,14 @@ async def current_game():
 async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
     players = []
     for pname in body.players:
-        players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": None})
+        players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": None, "scores": []})
     teams = []
     if body.use_teams and body.teams:
         for t in body.teams:
             tk = str(uuid.uuid4())
             teams.append({"key": tk, "name": t.get("name", "Team"), "totalScore": 0})
             for pname in t.get("player_names", []):
-                players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": tk})
+                players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": tk, "scores": []})
     doc = {
         "key": "current",
         "id": str(uuid.uuid4()),
@@ -338,12 +335,7 @@ async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
         "players": players,
         "teams": teams,
         "use_teams": body.use_teams,
-        "rounds": [],
         "started_at": now_iso(),
-        "current_turn_idx": 0,
-        "enable_timer": body.enable_timer,
-        "turn_duration_sec": body.turn_duration_sec,
-        "turn_started_at": now_iso() if body.enable_timer else None,
     }
     await db.current_game.replace_one({"key": "current"}, doc, upsert=True)
     if body.catalog_id:
@@ -357,26 +349,12 @@ async def add_player(body: AddPlayerReq, user: dict = Depends(require_admin)):
     g = await get_current_game()
     if not g or g.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active game")
-    new_p = {"key": str(uuid.uuid4()), "name": body.name.strip(), "totalScore": 0, "team_key": body.team_key}
+    new_p = {"key": str(uuid.uuid4()), "name": body.name.strip(), "totalScore": 0, "team_key": body.team_key, "scores": []}
     await db.current_game.update_one({"key": "current"}, {"$push": {"players": new_p}})
     await broadcast_current_game()
     return new_p
 
-def _apply_round_score(rounds: list, player_key: str, score: float, round_num: Optional[int]) -> list:
-    if round_num is None:
-        next_num = (rounds[-1]["round_num"] + 1) if rounds else 1
-        rounds.append({"round_num": next_num, "scores": {player_key: score}})
-        return rounds
-    for r in rounds:
-        if r["round_num"] == round_num:
-            r["scores"][player_key] = score
-            return rounds
-    rounds.append({"round_num": round_num, "scores": {player_key: score}})
-    return rounds
-
-def _recompute_totals(players: list, teams: list, rounds: list) -> None:
-    for p in players:
-        p["totalScore"] = sum(r["scores"].get(p["key"], 0) for r in rounds)
+def _recompute_team_totals(players: list, teams: list) -> None:
     for t in teams:
         t["totalScore"] = sum(p["totalScore"] for p in players if p.get("team_key") == t["key"])
 
@@ -385,26 +363,37 @@ async def submit_score(body: SubmitScoreReq, user: dict = Depends(require_admin)
     g = await get_current_game()
     if not g or g.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active game")
-    rounds = _apply_round_score(g.get("rounds", []), body.player_key, body.score, body.round_num)
     players = g["players"]
+    target = next((p for p in players if p["key"] == body.player_key), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    target.setdefault("scores", []).append(body.score)
+    target["totalScore"] = sum(target["scores"])
     teams = g.get("teams", [])
-    _recompute_totals(players, teams, rounds)
-    await db.current_game.update_one({"key": "current"}, {"$set": {"rounds": rounds, "players": players, "teams": teams}})
+    _recompute_team_totals(players, teams)
+    await db.current_game.update_one({"key": "current"}, {"$set": {"players": players, "teams": teams}})
     await broadcast_current_game()
     return {"ok": True}
 
-@api.post("/game/next-turn")
-async def next_turn(user: dict = Depends(require_admin)):
+@api.post("/game/undo-score")
+async def undo_score(body: UndoScoreReq, user: dict = Depends(require_admin)):
     g = await get_current_game()
     if not g or g.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active game")
-    n = len(g["players"])
-    if n == 0:
-        return {"ok": True}
-    new_idx = (g.get("current_turn_idx", 0) + 1) % n
-    await db.current_game.update_one({"key": "current"}, {"$set": {"current_turn_idx": new_idx, "turn_started_at": now_iso()}})
+    players = g["players"]
+    target = next((p for p in players if p["key"] == body.player_key), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Player not found")
+    scores = target.setdefault("scores", [])
+    if not scores:
+        raise HTTPException(status_code=400, detail="No score to undo")
+    removed = scores.pop()
+    target["totalScore"] = sum(scores)
+    teams = g.get("teams", [])
+    _recompute_team_totals(players, teams)
+    await db.current_game.update_one({"key": "current"}, {"$set": {"players": players, "teams": teams}})
     await broadcast_current_game()
-    return {"current_turn_idx": new_idx}
+    return {"ok": True, "removed": removed}
 
 @api.post("/game/reset")
 async def reset_game(user: dict = Depends(require_admin)):
@@ -413,9 +402,10 @@ async def reset_game(user: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail="No active game")
     for p in g["players"]:
         p["totalScore"] = 0
+        p["scores"] = []
     for t in g.get("teams", []):
         t["totalScore"] = 0
-    await db.current_game.update_one({"key": "current"}, {"$set": {"rounds": [], "players": g["players"], "teams": g.get("teams", []), "current_turn_idx": 0, "turn_started_at": now_iso() if g.get("enable_timer") else None}})
+    await db.current_game.update_one({"key": "current"}, {"$set": {"players": g["players"], "teams": g.get("teams", [])}})
     await broadcast_current_game()
     return {"ok": True}
 
@@ -476,10 +466,9 @@ async def end_game(user: dict = Depends(require_admin)):
         "ended_at": now_iso(),
         "started_at": g.get("started_at"),
         "winner_label": winner_label,
-        "players": [{"name": p["name"], "totalScore": p["totalScore"], "team_key": p.get("team_key")} for p in sorted_players],
+        "players": [{"name": p["name"], "totalScore": p["totalScore"], "team_key": p.get("team_key"), "scores": p.get("scores", [])} for p in sorted_players],
         "teams": g.get("teams", []),
         "use_teams": g.get("use_teams", False),
-        "rounds": g.get("rounds", []),
     }
     await db.game_history.insert_one(history_doc)
 

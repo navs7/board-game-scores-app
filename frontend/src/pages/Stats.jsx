@@ -116,19 +116,19 @@ export default function Stats() {
   const ROW_COLORS = ["#22C55E", "#FACC15", "#60A5FA", "#F472B6", "#FB923C", "#A78BFA", "#34D399", "#F87171"];
 
   return (
-    <div className="max-w-7xl mx-auto px-5 py-10">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-10">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4 mb-5 sm:mb-6">
         <div>
           <span className="label-eyebrow">STATS & HISTORY</span>
-          <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tighter mt-1">All-time records</h1>
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tighter mt-1">All-time records</h1>
         </div>
         <div className="flex items-center gap-2">
-          <button data-testid="export-csv-btn" onClick={exportCsv} className="btn-ghost px-4 py-2 rounded-lg flex items-center gap-2 text-sm"><FileCsv size={16} /> CSV</button>
-          <button data-testid="export-pdf-btn" onClick={exportPdf} className="btn-ghost px-4 py-2 rounded-lg flex items-center gap-2 text-sm"><FilePdf size={16} /> PDF</button>
+          <button data-testid="export-csv-btn" onClick={exportCsv} className="btn-ghost px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 text-sm"><FileCsv size={16} /> CSV</button>
+          <button data-testid="export-pdf-btn" onClick={exportPdf} className="btn-ghost px-3 sm:px-4 py-2 rounded-lg flex items-center gap-2 text-sm"><FilePdf size={16} /> PDF</button>
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 border-b border-white/5 pb-3">
+      <div className="flex gap-1.5 sm:gap-2 mb-5 sm:mb-6 border-b border-white/5 pb-3 overflow-x-auto">
         <Tab testid="tab-leaderboard" active={tab === "leaderboard"} onClick={() => setTab("leaderboard")}>Leaderboard</Tab>
         <Tab testid="tab-history" active={tab === "history"} onClick={() => setTab("history")}>History</Tab>
         <Tab testid="tab-players" active={tab === "players"} onClick={() => setTab("players")}>Players</Tab>
@@ -137,34 +137,32 @@ export default function Stats() {
 
       {tab === "leaderboard" && (
         <div className="card-surface p-1">
-          <div className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-2">
-              {[
-                ["wins", "Wins"],
-                ["winRate", "Win Rate"],
-                ["avgScore", "Avg Score"],
-                ["games", "Games"],
-              ].map(([k, l]) => (
-                <button key={k} data-testid={`sort-${k}`} onClick={() => setSortBy(k)} className={`text-xs px-3 py-1.5 rounded-full ${sortBy === k ? "bg-green-500/15 text-green-300 border border-green-500/30" : "border border-white/10 text-zinc-400"}`}>
-                  {l}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 p-3 sm:p-4">
+            {[
+              ["wins", "Wins"],
+              ["winRate", "Win Rate"],
+              ["avgScore", "Avg Score"],
+              ["games", "Games"],
+            ].map(([k, l]) => (
+              <button key={k} data-testid={`sort-${k}`} onClick={() => setSortBy(k)} className={`text-xs px-3 py-1.5 rounded-full ${sortBy === k ? "bg-green-500/15 text-green-300 border border-green-500/30" : "border border-white/10 text-zinc-400"}`}>
+                {l}
+              </button>
+            ))}
           </div>
-          <div className="divide-y divide-white/5">
-            <div className="grid grid-cols-12 px-4 py-2 label-eyebrow text-zinc-500">
+          <div className="divide-y divide-white/5 overflow-x-auto">
+            <div className="grid grid-cols-12 px-3 sm:px-4 py-2 label-eyebrow text-zinc-500 min-w-[480px]">
               <div className="col-span-1">#</div>
               <div className="col-span-4">Player</div>
               <div className="col-span-2 text-right">Wins</div>
-              <div className="col-span-2 text-right">Win Rate</div>
+              <div className="col-span-2 text-right">Rate</div>
               <div className="col-span-2 text-right">Avg</div>
-              <div className="col-span-1 text-right">Games</div>
+              <div className="col-span-1 text-right">G</div>
             </div>
             {filteredPlayers.length === 0 && <div className="px-6 py-10 text-center text-zinc-500">No player data yet.</div>}
             {filteredPlayers.map((p, idx) => (
-              <div key={p.name} data-testid={`leaderboard-row-${idx}`} className="grid grid-cols-12 px-4 py-3 items-center hover:bg-white/[0.02]">
+              <div key={p.name} data-testid={`leaderboard-row-${idx}`} className="grid grid-cols-12 px-3 sm:px-4 py-3 items-center hover:bg-white/[0.02] min-w-[480px]">
                 <div className="col-span-1 font-mono-num font-bold">{idx + 1}</div>
-                <div className="col-span-4 font-display font-semibold" style={{ color: ROW_COLORS[idx % ROW_COLORS.length] }}>{p.name}</div>
+                <div className="col-span-4 font-display font-semibold truncate" style={{ color: ROW_COLORS[idx % ROW_COLORS.length] }}>{p.name}</div>
                 <div className="col-span-2 text-right font-mono-num">{p.wins}</div>
                 <div className="col-span-2 text-right font-mono-num">{(p.winRate * 100).toFixed(0)}%</div>
                 <div className="col-span-2 text-right font-mono-num">{p.avgScore.toFixed(1)}</div>

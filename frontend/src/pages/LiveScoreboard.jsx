@@ -1,61 +1,50 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "@/context/GameContext";
-import { DiceFive, Trophy, Share, QrCode, Clock, X, Crown } from "@phosphor-icons/react";
+import { DiceFive, Trophy, Share, QrCode, X, Crown } from "@phosphor-icons/react";
 import { QRCodeSVG } from "qrcode.react";
+
+const FLOATING_DICE = [
+  { id: "fd-0", top: 10, left: 5, size: 48, delay: 0 },
+  { id: "fd-1", top: 23, left: 24, size: 60, delay: 0.7 },
+  { id: "fd-2", top: 36, left: 43, size: 72, delay: 1.4 },
+  { id: "fd-3", top: 49, left: 62, size: 48, delay: 2.1 },
+  { id: "fd-4", top: 62, left: 81, size: 60, delay: 2.8 },
+  { id: "fd-5", top: 75, left: 10, size: 72, delay: 3.5 },
+  { id: "fd-6", top: 8, left: 33, size: 48, delay: 4.2 },
+  { id: "fd-7", top: 21, left: 56, size: 60, delay: 4.9 },
+];
 
 function WaitingScreen() {
   return (
     <div data-testid="waiting-screen" className="relative min-h-[70vh] flex items-center justify-center overflow-hidden">
       <div className="absolute inset-0 bg-grid opacity-40 pointer-events-none" />
-      {/* floating dice background */}
       <div className="absolute inset-0 pointer-events-none">
-        {[
-          { id: "fd-0", top: 10, left: 5, size: 48, delay: 0 },
-          { id: "fd-1", top: 23, left: 24, size: 60, delay: 0.7 },
-          { id: "fd-2", top: 36, left: 43, size: 72, delay: 1.4 },
-          { id: "fd-3", top: 49, left: 62, size: 48, delay: 2.1 },
-          { id: "fd-4", top: 62, left: 81, size: 60, delay: 2.8 },
-          { id: "fd-5", top: 75, left: 10, size: 72, delay: 3.5 },
-          { id: "fd-6", top: 8, left: 33, size: 48, delay: 4.2 },
-          { id: "fd-7", top: 21, left: 56, size: 60, delay: 4.9 },
-        ].map((d) => (
-          <div
-            key={d.id}
-            className="absolute floaty opacity-10"
-            style={{ top: `${d.top}%`, left: `${d.left}%`, animationDelay: `${d.delay}s` }}
-          >
+        {FLOATING_DICE.map((d) => (
+          <div key={d.id} className="absolute floaty opacity-10" style={{ top: `${d.top}%`, left: `${d.left}%`, animationDelay: `${d.delay}s` }}>
             <DiceFive size={d.size} weight="duotone" color="#22C55E" />
           </div>
         ))}
       </div>
 
-      <div className="relative w-[400px] h-[400px] flex items-center justify-center">
-        {/* central logo */}
+      <div className="relative w-[280px] h-[280px] sm:w-[400px] sm:h-[400px] flex items-center justify-center">
         <motion.div
           animate={{ rotate: [0, 5, -5, 0] }}
           transition={{ duration: 6, repeat: Infinity }}
-          className="w-28 h-28 rounded-3xl bg-gradient-to-br from-green-400 to-yellow-300 flex items-center justify-center shadow-[0_0_60px_rgba(34,197,94,0.4)]"
+          className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-br from-green-400 to-yellow-300 flex items-center justify-center shadow-[0_0_60px_rgba(34,197,94,0.4)]"
         >
           <DiceFive size={56} weight="fill" color="#000" />
         </motion.div>
-        {/* orbiting dice */}
         <div className="absolute w-full h-full">
-          <div className="absolute top-1/2 left-1/2 orbit-dice">
-            <DiceFive size={32} weight="duotone" color="#22C55E" />
-          </div>
-          <div className="absolute top-1/2 left-1/2 orbit-dice slow">
-            <DiceFive size={28} weight="duotone" color="#FACC15" />
-          </div>
-          <div className="absolute top-1/2 left-1/2 orbit-dice reverse">
-            <DiceFive size={24} weight="duotone" color="#fff" />
-          </div>
+          <div className="absolute top-1/2 left-1/2 orbit-dice"><DiceFive size={28} weight="duotone" color="#22C55E" /></div>
+          <div className="absolute top-1/2 left-1/2 orbit-dice slow"><DiceFive size={24} weight="duotone" color="#FACC15" /></div>
+          <div className="absolute top-1/2 left-1/2 orbit-dice reverse"><DiceFive size={20} weight="duotone" color="#fff" /></div>
         </div>
       </div>
 
-      <div className="absolute bottom-12 text-center">
-        <p data-testid="waiting-title" className="font-display text-3xl font-bold">Waiting for the next game</p>
-        <p className="text-zinc-500 mt-2">The scoreboard will appear instantly when the host starts a new match.</p>
+      <div className="absolute bottom-8 sm:bottom-12 text-center px-4">
+        <p data-testid="waiting-title" className="font-display text-2xl sm:text-3xl font-bold">Waiting for the next game</p>
+        <p className="text-zinc-500 mt-2 text-sm sm:text-base">The scoreboard will appear when the host starts a match.</p>
       </div>
     </div>
   );
@@ -75,17 +64,13 @@ function ShareModal({ onClose }) {
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" data-testid="share-modal">
-      <motion.div
-        initial={{ scale: 0.92, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="glass max-w-md w-full p-8 rounded-2xl"
-      >
+      <motion.div initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="glass max-w-md w-full p-6 sm:p-8 rounded-2xl">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="font-display text-xl font-bold flex items-center gap-2"><QrCode size={22} /> Live Share</h3>
+          <h3 className="font-display text-lg sm:text-xl font-bold flex items-center gap-2"><QrCode size={22} /> Live Share</h3>
           <button data-testid="share-close" onClick={onClose} className="text-zinc-400 hover:text-white"><X size={20} /></button>
         </div>
         <div className="bg-white p-4 rounded-xl flex items-center justify-center">
-          <QRCodeSVG value={url} size={220} fgColor="#000" bgColor="#fff" level="M" />
+          <QRCodeSVG value={url} size={200} fgColor="#000" bgColor="#fff" level="M" />
         </div>
         <p className="text-xs text-zinc-500 mt-4 break-all font-mono-num">{url}</p>
         <button data-testid="copy-link-btn" onClick={copy} className="btn-primary w-full mt-4 py-3 rounded-lg font-semibold">
@@ -98,45 +83,23 @@ function ShareModal({ onClose }) {
 
 const ROW_COLORS = ["#22C55E", "#FACC15", "#60A5FA", "#F472B6", "#FB923C", "#A78BFA", "#34D399", "#F87171"];
 
-function GameTimer({ game }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(t);
-  }, []);
-  if (!game?.enable_timer || !game?.turn_started_at) return null;
-  const start = new Date(game.turn_started_at).getTime();
-  const elapsed = Math.max(0, Math.floor((now - start) / 1000));
-  const total = game.turn_duration_sec || 60;
-  const remaining = Math.max(0, total - elapsed);
-  const pct = Math.min(100, (elapsed / total) * 100);
-  const danger = remaining <= 10;
-  return (
-    <div data-testid="game-timer" className="card-surface p-4">
-      <div className="flex items-center justify-between mb-2">
-        <span className="label-eyebrow">Turn Timer</span>
-        <span className={`font-mono-num font-bold text-2xl ${danger ? "text-red-400" : "text-white"}`}>
-          {String(Math.floor(remaining / 60)).padStart(2, "0")}:{String(remaining % 60).padStart(2, "0")}
-        </span>
-      </div>
-      <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-        <div className={`h-full transition-all duration-500 ${danger ? "bg-red-500" : "bg-green-400"}`} style={{ width: `${100 - pct}%` }} />
-      </div>
-    </div>
-  );
-}
-
 export default function LiveScoreboard() {
   const { currentGame, connected } = useGame();
   const [showShare, setShowShare] = useState(false);
   const prevRanks = useRef({});
   const prevScores = useRef({});
-  const [flashes, setFlashes] = useState({}); // playerKey -> 'up'|'down'|'score'
+  const [flashes, setFlashes] = useState({});
 
   const sortedPlayers = useMemo(() => {
     if (!currentGame) return [];
     const asc = currentGame.ranking_order === "lowest";
     return [...currentGame.players].sort((a, b) => (asc ? a.totalScore - b.totalScore : b.totalScore - a.totalScore));
+  }, [currentGame]);
+
+  const sortedTeams = useMemo(() => {
+    if (!currentGame?.use_teams || !currentGame.teams) return [];
+    const asc = currentGame.ranking_order === "lowest";
+    return [...currentGame.teams].sort((a, b) => (asc ? a.totalScore - b.totalScore : b.totalScore - a.totalScore));
   }, [currentGame]);
 
   useEffect(() => {
@@ -166,15 +129,9 @@ export default function LiveScoreboard() {
     return undefined;
   }, [sortedPlayers, currentGame]);
 
-  const sortedTeams = useMemo(() => {
-    if (!currentGame?.use_teams || !currentGame.teams) return [];
-    const asc = currentGame.ranking_order === "lowest";
-    return [...currentGame.teams].sort((a, b) => (asc ? a.totalScore - b.totalScore : b.totalScore - a.totalScore));
-  }, [currentGame]);
-
   if (!currentGame) {
     return (
-      <div className="max-w-7xl mx-auto px-5 py-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-10">
         <WaitingScreen />
         {showShare && <ShareModal onClose={() => setShowShare(false)} />}
       </div>
@@ -184,9 +141,9 @@ export default function LiveScoreboard() {
   const winnerLabel = currentGame.ranking_order === "lowest" ? "Lowest wins" : "Highest wins";
 
   return (
-    <div className="max-w-7xl mx-auto px-5 py-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
-        <div>
+    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-6 sm:py-8">
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-5 sm:mb-6">
+        <div className="min-w-0">
           <span className="label-eyebrow flex items-center gap-2">
             <span className="relative inline-flex items-center justify-center w-2 h-2">
               <span className="live-dot" />
@@ -194,19 +151,16 @@ export default function LiveScoreboard() {
             </span>
             {connected ? "LIVE" : "RECONNECTING"} • {winnerLabel}
           </span>
-          <h1 data-testid="live-game-name" className="font-display text-4xl sm:text-5xl font-bold tracking-tighter mt-1">{currentGame.game_name}</h1>
+          <h1 data-testid="live-game-name" className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tighter mt-1 break-words">{currentGame.game_name}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <GameTimer game={currentGame} />
-          <button data-testid="share-btn" onClick={() => setShowShare(true)} className="btn-ghost px-4 py-3 rounded-lg flex items-center gap-2">
-            <Share size={16} /> Share
-          </button>
-        </div>
+        <button data-testid="share-btn" onClick={() => setShowShare(true)} className="btn-ghost px-3 sm:px-4 py-2 sm:py-3 rounded-lg flex items-center gap-2 text-sm shrink-0">
+          <Share size={16} /> Share
+        </button>
       </div>
 
       <div className="tracing-border p-1">
-        <div className="rounded-[13px] p-4 sm:p-6 bg-[#0a0a0a]">
-          <div className="grid grid-cols-12 px-3 pb-2 label-eyebrow text-zinc-500">
+        <div className="rounded-[13px] p-3 sm:p-6 bg-[#0a0a0a]">
+          <div className="hidden sm:grid grid-cols-12 px-3 pb-2 label-eyebrow text-zinc-500">
             <div className="col-span-1">Rank</div>
             <div className="col-span-7 sm:col-span-8">Player</div>
             <div className="col-span-4 sm:col-span-3 text-right">Score</div>
@@ -216,7 +170,6 @@ export default function LiveScoreboard() {
               {sortedPlayers.map((p, idx) => {
                 const flash = flashes[p.key];
                 const color = ROW_COLORS[idx % ROW_COLORS.length];
-                const isTurn = currentGame.players[currentGame.current_turn_idx]?.key === p.key;
                 return (
                   <motion.div
                     layout
@@ -225,33 +178,33 @@ export default function LiveScoreboard() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: idx * 0.05, type: "spring", stiffness: 200, damping: 20 }}
                     data-testid={`player-rank-${idx + 1}`}
-                    className={`grid grid-cols-12 items-center px-3 py-4 rounded-xl border border-white/5 ${flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""} ${isTurn ? "bg-green-500/5 border-green-500/30" : "bg-white/[0.02]"}`}
+                    className={`flex items-center gap-3 px-3 sm:px-4 py-3 sm:py-4 rounded-xl border border-white/5 bg-white/[0.02] ${flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""}`}
                   >
-                    <div className="col-span-1 font-display text-2xl font-bold" style={{ color: idx === 0 ? "#FACC15" : "#fff" }}>
-                      {idx === 0 ? <Crown size={28} weight="fill" /> : `#${idx + 1}`}
+                    <div className="w-10 sm:w-12 font-display text-xl sm:text-2xl font-bold shrink-0" style={{ color: idx === 0 ? "#FACC15" : "#fff" }}>
+                      {idx === 0 ? <Crown size={24} weight="fill" /> : `#${idx + 1}`}
                     </div>
-                    <div className="col-span-7 sm:col-span-8 flex items-center gap-3">
-                      <div className="w-2 h-8 rounded-full" style={{ background: color }} />
-                      <div>
-                        <div className="font-display text-xl font-semibold" style={{ color }}>{p.name}</div>
-                        {p.team_key && currentGame.teams?.find((t) => t.key === p.team_key) && (
-                          <div className="text-xs text-zinc-500">Team: {currentGame.teams.find((t) => t.key === p.team_key).name}</div>
-                        )}
-                      </div>
-                      {isTurn && (
-                        <span data-testid="turn-indicator" className="ml-2 chip text-green-400 border-green-500/50">
-                          <Clock size={12} /> Turn
-                        </span>
+                    <div className="w-1.5 h-10 sm:h-12 rounded-full shrink-0" style={{ background: color }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-display text-lg sm:text-xl font-semibold truncate" style={{ color }}>{p.name}</div>
+                      {p.team_key && currentGame.teams?.find((t) => t.key === p.team_key) && (
+                        <div className="text-[10px] sm:text-xs text-zinc-500">Team: {currentGame.teams.find((t) => t.key === p.team_key).name}</div>
+                      )}
+                      {p.scores && p.scores.length > 0 && (
+                        <div className="hidden sm:flex flex-wrap gap-1 mt-1.5">
+                          {p.scores.slice(-6).map((s, sIdx) => (
+                            <span key={`${p.key}-r${p.scores.length - 6 + sIdx}`} className="text-[10px] text-zinc-500 font-mono-num bg-white/[0.03] border border-white/5 px-1.5 py-0.5 rounded">
+                              R{p.scores.length - p.scores.slice(-6).length + sIdx + 1}:{s}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    <div className="col-span-4 sm:col-span-3 text-right">
-                      <span
-                        data-testid={`player-score-${p.key}`}
-                        className={`inline-flex items-center justify-end px-4 py-2 rounded-xl font-mono-num font-bold text-2xl sm:text-3xl ${flash === "score" || flash === "up" || flash === "down" ? "flash-yellow" : ""}`}
-                      >
-                        {p.totalScore}
-                      </span>
-                    </div>
+                    <span
+                      data-testid={`player-score-${p.key}`}
+                      className={`font-mono-num font-bold text-2xl sm:text-3xl px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl shrink-0 ${flash === "score" || flash === "up" || flash === "down" ? "flash-yellow" : ""}`}
+                    >
+                      {p.totalScore}
+                    </span>
                   </motion.div>
                 );
               })}
