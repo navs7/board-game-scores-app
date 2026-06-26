@@ -31,7 +31,7 @@ export function AuthProvider({ children }) {
     try {
       await api.post("/auth/logout");
     } catch (e) {
-      /* ignore */
+      console.warn("[auth] logout request failed:", e?.message);
     }
     setToken(null);
     setUser(false);

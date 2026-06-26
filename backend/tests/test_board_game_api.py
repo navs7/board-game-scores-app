@@ -11,10 +11,10 @@ import pytest
 import requests
 import websockets
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://play-counter-2.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN_EMAIL = "admin@boardgame.app"
-ADMIN_PASSWORD = "admin123"
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@boardgame.app")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 
 # ---------- Fixtures ----------
@@ -213,7 +213,7 @@ class TestGameLifecycle:
         r = requests.post(f"{API}/game/start", json=body, headers=admin_headers)
         assert r.status_code == 200, r.text
         g = r.json()
-        assert g["use_teams"] is True
+        assert g["use_teams"] == True
         assert len(g["teams"]) == 2
         assert len(g["players"]) == 4
         keys = {p["name"]: p["key"] for p in g["players"]}

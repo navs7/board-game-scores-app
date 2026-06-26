@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
@@ -30,19 +30,23 @@ export default function Stats() {
   const [search, setSearch] = useState("");
   const [expandedGame, setExpandedGame] = useState(null);
 
-  const load = async () => {
-    const [p, h, d] = await Promise.all([
-      api.get("/players"),
-      api.get("/history", { params: catalogFilter ? { catalog_id: catalogFilter } : {} }),
-      api.get("/achievements/definitions"),
-    ]);
-    setPlayers(p.data || []);
-    setHistory(h.data || []);
-    setDefs(d.data || []);
-  };
+  const load = useCallback(async () => {
+    try {
+      const [p, h, d] = await Promise.all([
+        api.get("/players"),
+        api.get("/history", { params: catalogFilter ? { catalog_id: catalogFilter } : {} }),
+        api.get("/achievements/definitions"),
+      ]);
+      setPlayers(p.data || []);
+      setHistory(h.data || []);
+      setDefs(d.data || []);
+    } catch (e) {
+      console.warn("[stats] load failed:", e?.message);
+    }
+  }, [catalogFilter]);
   useEffect(() => {
     load();
-  }, [catalogFilter]);
+  }, [load]);
 
   const sortedPlayers = useMemo(() => {
     const arr = [...players];
@@ -195,7 +199,7 @@ export default function Stats() {
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                       <div className="mt-3 pl-8 grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {g.players.map((p, i) => (
-                          <div key={i} className="flex items-center justify-between border border-white/5 rounded-lg px-3 py-2">
+                          <div key={`${g.id}-${p.name}`} className="flex items-center justify-between border border-white/5 rounded-lg px-3 py-2">
                             <span style={{ color: ROW_COLORS[i % ROW_COLORS.length] }}>{p.name}</span>
                             <span className="font-mono-num font-bold">{p.totalScore}</span>
                           </div>

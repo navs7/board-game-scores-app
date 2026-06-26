@@ -9,13 +9,15 @@ export function GameProvider({ children }) {
   const wsRef = useRef(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let reconnectTimer = null;
+
     // Initial fetch
     api
       .get("/game/current")
-      .then((r) => setCurrentGame(r.data || null))
-      .catch(() => { /* ignore */ });
+      .then((r) => { if (!cancelled) setCurrentGame(r.data || null); })
+      .catch((e) => console.warn("[game] initial fetch failed:", e?.message));
 
-    let cancelled = false;
     function connect() {
       if (cancelled) return;
       const ws = new WebSocket(wsUrl());
@@ -25,20 +27,31 @@ export function GameProvider({ children }) {
         try {
           const msg = JSON.parse(evt.data);
           if (msg.type === "current_game") setCurrentGame(msg.data || null);
-        } catch (e) { /* ignore */ }
+        } catch (e) {
+          console.warn("[game] ws message parse failed:", e?.message);
+        }
       };
       ws.onclose = () => {
         setConnected(false);
-        setTimeout(connect, 2000);
+        if (!cancelled) reconnectTimer = setTimeout(connect, 2000);
       };
-      ws.onerror = () => {
-        try { ws.close(); } catch (e) { /* ignore */ }
+      ws.onerror = (e) => {
+        console.warn("[game] ws error:", e?.message || "unknown");
+        try { ws.close(); } catch (err) {
+          console.warn("[game] ws close after error failed:", err?.message);
+        }
       };
     }
     connect();
+
     return () => {
       cancelled = true;
-      try { wsRef.current && wsRef.current.close(); } catch (e) { /* ignore */ }
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      try {
+        if (wsRef.current) wsRef.current.close();
+      } catch (e) {
+        console.warn("[game] ws teardown failed:", e?.message);
+      }
     };
   }, []);
 

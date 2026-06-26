@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -13,13 +13,17 @@ export default function Library() {
   const [ranking, setRanking] = useState("highest");
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
-    const r = await api.get("/catalog");
-    setItems(r.data || []);
-  };
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get("/catalog");
+      setItems(r.data || []);
+    } catch (e) {
+      console.warn("[library] load failed:", e?.message);
+    }
+  }, []);
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const add = async (e) => {
     e.preventDefault();

@@ -179,21 +179,19 @@ ACHIEVEMENT_DEFS = [
     {"id": "perfectionist", "name": "Win Rate 75%+", "desc": "Maintain a 75% win rate (min 5 games)", "icon": "Target"},
 ]
 
+ACHIEVEMENT_RULES = [
+    ("first_win", lambda r: r.get("wins", 0) >= 1),
+    ("five_wins", lambda r: r.get("wins", 0) >= 5),
+    ("ten_wins", lambda r: r.get("wins", 0) >= 10),
+    ("veteran", lambda r: r.get("gamesPlayed", 0) >= 25),
+    ("streak3", lambda r: max(r.get("currentStreak", 0), r.get("bestStreak", 0)) >= 3),
+    ("streak5", lambda r: max(r.get("currentStreak", 0), r.get("bestStreak", 0)) >= 5),
+    ("century", lambda r: r.get("bestSingleScore", 0) >= 100),
+    ("perfectionist", lambda r: r.get("gamesPlayed", 0) >= 5 and (r.get("wins", 0) / r["gamesPlayed"]) >= 0.75),
+]
+
 def compute_achievements(record: dict) -> List[str]:
-    out = []
-    wins = record.get("wins", 0)
-    games = record.get("gamesPlayed", 0)
-    streak = record.get("currentStreak", 0)
-    best_score = record.get("bestSingleScore", 0)
-    if wins >= 1: out.append("first_win")
-    if wins >= 5: out.append("five_wins")
-    if wins >= 10: out.append("ten_wins")
-    if games >= 25: out.append("veteran")
-    if streak >= 3 or record.get("bestStreak", 0) >= 3: out.append("streak3")
-    if streak >= 5 or record.get("bestStreak", 0) >= 5: out.append("streak5")
-    if best_score >= 100: out.append("century")
-    if games >= 5 and (wins / games) >= 0.75: out.append("perfectionist")
-    return out
+    return [aid for aid, rule in ACHIEVEMENT_RULES if rule(record)]
 
 # -------------------------
 # Auth Endpoints
@@ -219,30 +217,39 @@ async def register(body: RegisterReq, response: Response):
     set_auth_cookies(response, access, refresh)
     return {"id": uid, "email": email, "name": body.name, "role": "user", "access_token": access}
 
+def _extract_client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+
+async def _check_lockout(rec: Optional[dict]) -> None:
+    if not rec or not rec.get("locked_until"):
+        return
+    locked_until = datetime.fromisoformat(rec["locked_until"])
+    if locked_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=429, detail="Too many failed attempts. Try later.")
+
+async def _record_failed_attempt(ident: str, prev_rec: Optional[dict]) -> bool:
+    """Returns True if this attempt triggered a new lockout."""
+    attempts = (prev_rec or {}).get("attempts", 0) + 1
+    update = {"identifier": ident, "attempts": attempts}
+    locked = attempts >= 5
+    if locked:
+        update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+        update["attempts"] = 0
+    await db.login_attempts.update_one({"identifier": ident}, {"$set": update}, upsert=True)
+    return locked
+
 @api.post("/auth/login")
 async def login(body: LoginReq, request: Request, response: Response):
     email = body.email.lower()
-    # Derive real client IP behind reverse proxy / K8s ingress
-    xff = request.headers.get("x-forwarded-for", "")
-    real_ip = request.headers.get("x-real-ip", "")
-    client_ip = (xff.split(",")[0].strip() if xff else "") or real_ip or (request.client.host if request.client else "unknown")
-    ident = f"{client_ip}:{email}"
-    # brute force check
+    ident = f"{_extract_client_ip(request)}:{email}"
     rec = await db.login_attempts.find_one({"identifier": ident})
-    if rec and rec.get("locked_until"):
-        locked_until = datetime.fromisoformat(rec["locked_until"])
-        if locked_until > datetime.now(timezone.utc):
-            raise HTTPException(status_code=429, detail="Too many failed attempts. Try later.")
+    await _check_lockout(rec)
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
-        attempts = (rec or {}).get("attempts", 0) + 1
-        update = {"identifier": ident, "attempts": attempts}
-        locked = False
-        if attempts >= 5:
-            update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-            update["attempts"] = 0
-            locked = True
-        await db.login_attempts.update_one({"identifier": ident}, {"$set": update}, upsert=True)
+        locked = await _record_failed_attempt(ident, rec)
         if locked:
             raise HTTPException(status_code=429, detail="Too many failed attempts. Try again in 15 minutes.")
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -355,33 +362,33 @@ async def add_player(body: AddPlayerReq, user: dict = Depends(require_admin)):
     await broadcast_current_game()
     return new_p
 
+def _apply_round_score(rounds: list, player_key: str, score: float, round_num: Optional[int]) -> list:
+    if round_num is None:
+        next_num = (rounds[-1]["round_num"] + 1) if rounds else 1
+        rounds.append({"round_num": next_num, "scores": {player_key: score}})
+        return rounds
+    for r in rounds:
+        if r["round_num"] == round_num:
+            r["scores"][player_key] = score
+            return rounds
+    rounds.append({"round_num": round_num, "scores": {player_key: score}})
+    return rounds
+
+def _recompute_totals(players: list, teams: list, rounds: list) -> None:
+    for p in players:
+        p["totalScore"] = sum(r["scores"].get(p["key"], 0) for r in rounds)
+    for t in teams:
+        t["totalScore"] = sum(p["totalScore"] for p in players if p.get("team_key") == t["key"])
+
 @api.post("/game/submit-score")
 async def submit_score(body: SubmitScoreReq, user: dict = Depends(require_admin)):
     g = await get_current_game()
     if not g or g.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active game")
-    rounds = g.get("rounds", [])
-    if body.round_num is None:
-        round_num = (rounds[-1]["round_num"] + 1) if rounds else 1
-        rounds.append({"round_num": round_num, "scores": {body.player_key: body.score}})
-    else:
-        # update existing round
-        found = False
-        for r in rounds:
-            if r["round_num"] == body.round_num:
-                r["scores"][body.player_key] = body.score
-                found = True
-                break
-        if not found:
-            rounds.append({"round_num": body.round_num, "scores": {body.player_key: body.score}})
-    # recompute totals
+    rounds = _apply_round_score(g.get("rounds", []), body.player_key, body.score, body.round_num)
     players = g["players"]
-    for p in players:
-        p["totalScore"] = sum(r["scores"].get(p["key"], 0) for r in rounds)
-    # team totals
     teams = g.get("teams", [])
-    for t in teams:
-        t["totalScore"] = sum(p["totalScore"] for p in players if p.get("team_key") == t["key"])
+    _recompute_totals(players, teams, rounds)
     await db.current_game.update_one({"key": "current"}, {"$set": {"rounds": rounds, "players": players, "teams": teams}})
     await broadcast_current_game()
     return {"ok": True}
@@ -418,18 +425,49 @@ async def abandon_game(user: dict = Depends(require_admin)):
     await manager.broadcast({"type": "current_game", "data": None})
     return {"ok": True}
 
+def _rank_entities(entities: list, ranking: str) -> list:
+    return sorted(entities, key=lambda e: e["totalScore"], reverse=(ranking == "highest"))
+
+def _determine_winners(game: dict, sorted_players: list, sorted_teams: list) -> tuple:
+    if game.get("use_teams"):
+        if not sorted_teams:
+            return ("—", set())
+        winning_team_key = sorted_teams[0]["key"]
+        return (sorted_teams[0]["name"], {p["key"] for p in game["players"] if p.get("team_key") == winning_team_key})
+    if not sorted_players:
+        return ("—", set())
+    return (sorted_players[0]["name"], {sorted_players[0]["key"]})
+
+def _new_player_record(name: str) -> dict:
+    return {"name": name, "gamesPlayed": 0, "wins": 0, "totalScore": 0, "bestSingleScore": 0, "currentStreak": 0, "bestStreak": 0, "lastPlayed": now_iso(), "achievements": []}
+
+async def _update_player_record(player: dict, is_winner: bool) -> None:
+    rec = await db.player_records.find_one({"name": player["name"]}) or _new_player_record(player["name"])
+    score = player["totalScore"]
+    rec["gamesPlayed"] += 1
+    rec["totalScore"] += score
+    rec["bestSingleScore"] = max(rec.get("bestSingleScore", 0), score)
+    rec["lastPlayed"] = now_iso()
+    if is_winner:
+        rec["wins"] = rec.get("wins", 0) + 1
+        rec["currentStreak"] = rec.get("currentStreak", 0) + 1
+        rec["bestStreak"] = max(rec.get("bestStreak", 0), rec["currentStreak"])
+    else:
+        rec["currentStreak"] = 0
+    rec["achievements"] = compute_achievements(rec)
+    rec.pop("_id", None)
+    await db.player_records.update_one({"name": player["name"]}, {"$set": rec}, upsert=True)
+
 @api.post("/game/end")
 async def end_game(user: dict = Depends(require_admin)):
     g = await get_current_game()
     if not g or g.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active game")
     ranking = g["ranking_order"]
-    players = sorted(g["players"], key=lambda p: p["totalScore"], reverse=(ranking == "highest"))
-    if g.get("use_teams"):
-        teams_sorted = sorted(g.get("teams", []), key=lambda t: t["totalScore"], reverse=(ranking == "highest"))
-        winner_label = teams_sorted[0]["name"] if teams_sorted else "—"
-    else:
-        winner_label = players[0]["name"] if players else "—"
+    sorted_players = _rank_entities(g["players"], ranking)
+    sorted_teams = _rank_entities(g.get("teams", []), ranking) if g.get("use_teams") else []
+    winner_label, winner_keys = _determine_winners(g, sorted_players, sorted_teams)
+
     history_doc = {
         "id": str(uuid.uuid4()),
         "game_name": g["game_name"],
@@ -438,43 +476,15 @@ async def end_game(user: dict = Depends(require_admin)):
         "ended_at": now_iso(),
         "started_at": g.get("started_at"),
         "winner_label": winner_label,
-        "players": [{"name": p["name"], "totalScore": p["totalScore"], "team_key": p.get("team_key")} for p in players],
+        "players": [{"name": p["name"], "totalScore": p["totalScore"], "team_key": p.get("team_key")} for p in sorted_players],
         "teams": g.get("teams", []),
         "use_teams": g.get("use_teams", False),
         "rounds": g.get("rounds", []),
     }
     await db.game_history.insert_one(history_doc)
 
-    # Update player records
-    winner_player_keys = set()
-    if g.get("use_teams"):
-        if teams_sorted:
-            winning_team = teams_sorted[0]["key"]
-            winner_player_keys = {p["key"] for p in g["players"] if p.get("team_key") == winning_team}
-    else:
-        if players:
-            winner_player_keys = {players[0]["key"]}
-
     for p in g["players"]:
-        pname = p["name"]
-        is_winner = p["key"] in winner_player_keys
-        score = p["totalScore"]
-        rec = await db.player_records.find_one({"name": pname})
-        if not rec:
-            rec = {"name": pname, "gamesPlayed": 0, "wins": 0, "totalScore": 0, "bestSingleScore": 0, "currentStreak": 0, "bestStreak": 0, "lastPlayed": now_iso(), "achievements": []}
-        rec["gamesPlayed"] += 1
-        rec["totalScore"] += score
-        rec["bestSingleScore"] = max(rec.get("bestSingleScore", 0), score)
-        rec["lastPlayed"] = now_iso()
-        if is_winner:
-            rec["wins"] = rec.get("wins", 0) + 1
-            rec["currentStreak"] = rec.get("currentStreak", 0) + 1
-            rec["bestStreak"] = max(rec.get("bestStreak", 0), rec["currentStreak"])
-        else:
-            rec["currentStreak"] = 0
-        rec["achievements"] = compute_achievements(rec)
-        rec.pop("_id", None)
-        await db.player_records.update_one({"name": pname}, {"$set": rec}, upsert=True)
+        await _update_player_record(p, p["key"] in winner_keys)
 
     await db.current_game.delete_one({"key": "current"})
     await manager.broadcast({"type": "current_game", "data": None})

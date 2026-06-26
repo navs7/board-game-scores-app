@@ -10,17 +10,22 @@ function WaitingScreen() {
       <div className="absolute inset-0 bg-grid opacity-40 pointer-events-none" />
       {/* floating dice background */}
       <div className="absolute inset-0 pointer-events-none">
-        {[...Array(8)].map((_, i) => (
+        {[
+          { id: "fd-0", top: 10, left: 5, size: 48, delay: 0 },
+          { id: "fd-1", top: 23, left: 24, size: 60, delay: 0.7 },
+          { id: "fd-2", top: 36, left: 43, size: 72, delay: 1.4 },
+          { id: "fd-3", top: 49, left: 62, size: 48, delay: 2.1 },
+          { id: "fd-4", top: 62, left: 81, size: 60, delay: 2.8 },
+          { id: "fd-5", top: 75, left: 10, size: 72, delay: 3.5 },
+          { id: "fd-6", top: 8, left: 33, size: 48, delay: 4.2 },
+          { id: "fd-7", top: 21, left: 56, size: 60, delay: 4.9 },
+        ].map((d) => (
           <div
-            key={i}
+            key={d.id}
             className="absolute floaty opacity-10"
-            style={{
-              top: `${(i * 13 + 10) % 80}%`,
-              left: `${(i * 19 + 5) % 90}%`,
-              animationDelay: `${i * 0.7}s`,
-            }}
+            style={{ top: `${d.top}%`, left: `${d.left}%`, animationDelay: `${d.delay}s` }}
           >
-            <DiceFive size={48 + (i % 3) * 12} weight="duotone" color="#22C55E" />
+            <DiceFive size={d.size} weight="duotone" color="#22C55E" />
           </div>
         ))}
       </div>
@@ -64,7 +69,9 @@ function ShareModal({ onClose }) {
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch (e) { /* clipboard unavailable */ }
+    } catch (e) {
+      console.warn("[share] clipboard write failed:", e?.message);
+    }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" data-testid="share-modal">
@@ -136,7 +143,7 @@ export default function LiveScoreboard() {
     if (!currentGame) {
       prevRanks.current = {};
       prevScores.current = {};
-      return;
+      return undefined;
     }
     const newFlashes = {};
     sortedPlayers.forEach((p, idx) => {
@@ -146,7 +153,6 @@ export default function LiveScoreboard() {
         newFlashes[p.key] = idx < prevRank ? "up" : "down";
       }
       if (prevScore !== undefined && prevScore !== p.totalScore) {
-        // overlay score flash even if rank didn't change
         newFlashes[p.key] = newFlashes[p.key] || "score";
       }
       prevRanks.current[p.key] = idx;
@@ -154,9 +160,17 @@ export default function LiveScoreboard() {
     });
     if (Object.keys(newFlashes).length) {
       setFlashes(newFlashes);
-      setTimeout(() => setFlashes({}), 1600);
+      const t = setTimeout(() => setFlashes({}), 1600);
+      return () => clearTimeout(t);
     }
+    return undefined;
   }, [sortedPlayers, currentGame]);
+
+  const sortedTeams = useMemo(() => {
+    if (!currentGame?.use_teams || !currentGame.teams) return [];
+    const asc = currentGame.ranking_order === "lowest";
+    return [...currentGame.teams].sort((a, b) => (asc ? a.totalScore - b.totalScore : b.totalScore - a.totalScore));
+  }, [currentGame]);
 
   if (!currentGame) {
     return (
@@ -244,11 +258,11 @@ export default function LiveScoreboard() {
             </AnimatePresence>
           </div>
 
-          {currentGame.use_teams && currentGame.teams?.length > 0 && (
+          {currentGame.use_teams && sortedTeams.length > 0 && (
             <div className="mt-6 pt-4 border-t border-white/5">
               <div className="label-eyebrow mb-3 flex items-center gap-2"><Trophy size={14} /> Team Totals</div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="team-totals">
-                {[...currentGame.teams].sort((a, b) => (currentGame.ranking_order === "lowest" ? a.totalScore - b.totalScore : b.totalScore - a.totalScore)).map((t, idx) => (
+                {sortedTeams.map((t, idx) => (
                   <div key={t.key} className="card-surface p-4 flex items-center justify-between">
                     <span className="font-display text-lg font-semibold">{idx === 0 && <Crown size={18} weight="fill" className="inline mr-2 text-yellow-300" />}{t.name}</span>
                     <span className="font-mono-num text-2xl font-bold">{t.totalScore}</span>

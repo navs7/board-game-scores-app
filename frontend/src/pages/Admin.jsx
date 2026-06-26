@@ -11,15 +11,16 @@ function StartGameForm({ onStarted }) {
   const [catalogId, setCatalogId] = useState("");
   const [name, setName] = useState("");
   const [ranking, setRanking] = useState("highest");
-  const [players, setPlayers] = useState([""]);
+  const [players, setPlayers] = useState([{ id: "p-0", name: "" }]);
   const [useTeams, setUseTeams] = useState(false);
-  const [teams, setTeams] = useState([{ name: "Team A", player_names: ["", ""] }]);
+  const [teams, setTeams] = useState([{ id: "t-0", name: "Team A", player_names: [{ id: "tp-0", name: "" }, { id: "tp-1", name: "" }] }]);
   const [enableTimer, setEnableTimer] = useState(false);
   const [turnDuration, setTurnDuration] = useState(60);
   const [busy, setBusy] = useState(false);
+  const newId = () => `id-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   useEffect(() => {
-    api.get("/catalog").then((r) => setCatalog(r.data || []));
+    api.get("/catalog").then((r) => setCatalog(r.data || [])).catch((e) => console.warn("[admin] catalog load failed:", e?.message));
   }, []);
 
   const selectCat = (id) => {
@@ -39,16 +40,18 @@ function StartGameForm({ onStarted }) {
         game_name: name,
         catalog_id: catalogId || null,
         ranking_order: ranking,
-        players: useTeams ? [] : players.map((p) => p.trim()).filter(Boolean),
+        players: useTeams ? [] : players.map((p) => p.name.trim()).filter(Boolean),
         use_teams: useTeams,
         teams: useTeams
-          ? teams.map((t) => ({ name: t.name, player_names: t.player_names.map((p) => p.trim()).filter(Boolean) }))
+          ? teams.map((t) => ({ name: t.name, player_names: t.player_names.map((p) => p.name.trim()).filter(Boolean) }))
           : [],
         enable_timer: enableTimer,
         turn_duration_sec: Number(turnDuration) || 60,
       };
       await api.post("/game/start", payload);
       onStarted();
+    } catch (e2) {
+      console.warn("[admin] start game failed:", e2?.message);
     } finally {
       setBusy(false);
     }
@@ -100,14 +103,14 @@ function StartGameForm({ onStarted }) {
           <label className="label-eyebrow block mb-2 flex items-center gap-2"><Users size={14} /> Players</label>
           <div className="space-y-2">
             {players.map((p, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input data-testid={`player-name-input-${i}`} className="input" placeholder={`Player ${i + 1}`} value={p} onChange={(e) => setPlayers(players.map((x, j) => (j === i ? e.target.value : x)))} />
+              <div key={p.id} className="flex items-center gap-2">
+                <input data-testid={`player-name-input-${i}`} className="input" placeholder={`Player ${i + 1}`} value={p.name} onChange={(e) => setPlayers(players.map((x) => (x.id === p.id ? { ...x, name: e.target.value } : x)))} />
                 {players.length > 1 && (
-                  <button type="button" onClick={() => setPlayers(players.filter((_, j) => j !== i))} className="btn-ghost px-3 py-2 rounded-lg"><X size={14} /></button>
+                  <button type="button" onClick={() => setPlayers(players.filter((x) => x.id !== p.id))} className="btn-ghost px-3 py-2 rounded-lg"><X size={14} /></button>
                 )}
               </div>
             ))}
-            <button type="button" data-testid="add-player-btn" onClick={() => setPlayers([...players, ""])} className="btn-ghost px-3 py-2 rounded-lg text-sm flex items-center gap-2"><Plus size={14} /> Add player</button>
+            <button type="button" data-testid="add-player-btn" onClick={() => setPlayers([...players, { id: newId(), name: "" }])} className="btn-ghost px-3 py-2 rounded-lg text-sm flex items-center gap-2"><Plus size={14} /> Add player</button>
           </div>
         </div>
       )}
@@ -115,24 +118,24 @@ function StartGameForm({ onStarted }) {
       {useTeams && (
         <div className="space-y-4">
           {teams.map((t, ti) => (
-            <div key={ti} className="border border-white/10 rounded-xl p-4">
+            <div key={t.id} className="border border-white/10 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
-                <input data-testid={`team-name-${ti}`} className="input" value={t.name} onChange={(e) => setTeams(teams.map((x, j) => (j === ti ? { ...x, name: e.target.value } : x)))} />
+                <input data-testid={`team-name-${ti}`} className="input" value={t.name} onChange={(e) => setTeams(teams.map((x) => (x.id === t.id ? { ...x, name: e.target.value } : x)))} />
                 {teams.length > 1 && (
-                  <button type="button" onClick={() => setTeams(teams.filter((_, j) => j !== ti))} className="btn-ghost px-3 py-2 rounded-lg"><X size={14} /></button>
+                  <button type="button" onClick={() => setTeams(teams.filter((x) => x.id !== t.id))} className="btn-ghost px-3 py-2 rounded-lg"><X size={14} /></button>
                 )}
               </div>
               <div className="space-y-2 pl-3">
                 {t.player_names.map((pn, pi) => (
-                  <div key={pi} className="flex items-center gap-2">
-                    <input data-testid={`team-${ti}-player-${pi}`} className="input" placeholder={`Player ${pi + 1}`} value={pn} onChange={(e) => setTeams(teams.map((x, j) => (j === ti ? { ...x, player_names: x.player_names.map((y, k) => (k === pi ? e.target.value : y)) } : x)))} />
+                  <div key={pn.id} className="flex items-center gap-2">
+                    <input data-testid={`team-${ti}-player-${pi}`} className="input" placeholder={`Player ${pi + 1}`} value={pn.name} onChange={(e) => setTeams(teams.map((x) => (x.id === t.id ? { ...x, player_names: x.player_names.map((y) => (y.id === pn.id ? { ...y, name: e.target.value } : y)) } : x)))} />
                   </div>
                 ))}
-                <button type="button" onClick={() => setTeams(teams.map((x, j) => (j === ti ? { ...x, player_names: [...x.player_names, ""] } : x)))} className="btn-ghost px-3 py-1.5 rounded-lg text-xs"><Plus size={12} /> Add to team</button>
+                <button type="button" onClick={() => setTeams(teams.map((x) => (x.id === t.id ? { ...x, player_names: [...x.player_names, { id: newId(), name: "" }] } : x)))} className="btn-ghost px-3 py-1.5 rounded-lg text-xs"><Plus size={12} /> Add to team</button>
               </div>
             </div>
           ))}
-          <button type="button" data-testid="add-team-btn" onClick={() => setTeams([...teams, { name: `Team ${String.fromCharCode(65 + teams.length)}`, player_names: ["", ""] }])} className="btn-ghost px-3 py-2 rounded-lg text-sm flex items-center gap-2"><Plus size={14} /> Add team</button>
+          <button type="button" data-testid="add-team-btn" onClick={() => setTeams([...teams, { id: newId(), name: `Team ${String.fromCharCode(65 + teams.length)}`, player_names: [{ id: newId(), name: "" }, { id: newId(), name: "" }] }])} className="btn-ghost px-3 py-2 rounded-lg text-sm flex items-center gap-2"><Plus size={14} /> Add team</button>
         </div>
       )}
 
