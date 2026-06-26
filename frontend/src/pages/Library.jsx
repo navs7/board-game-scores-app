@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 import { Plus, Trash, DiceFive, Books } from "@phosphor-icons/react";
+import ConfirmModal from "@/components/ConfirmModal";
 
 export default function Library() {
   const { user } = useAuth();
@@ -12,6 +13,7 @@ export default function Library() {
   const [desc, setDesc] = useState("");
   const [ranking, setRanking] = useState("highest");
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -38,10 +40,16 @@ export default function Library() {
     }
   };
 
-  const del = async (id) => {
-    if (!window.confirm("Delete this game from library?")) return;
-    await api.delete(`/catalog/${id}`);
-    await load();
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    try {
+      await api.delete(`/catalog/${pendingDelete.id}`);
+      await load();
+    } catch (e) {
+      console.warn("[library] delete failed:", e?.message);
+    } finally {
+      setPendingDelete(null);
+    }
   };
 
   return (
@@ -84,7 +92,7 @@ export default function Library() {
             <div className="flex items-start justify-between mb-3">
               <span className="chip">{it.default_ranking === "highest" ? "↑ Highest" : "↓ Lowest"} wins</span>
               {user && user.role === "admin" && (
-                <button data-testid={`delete-catalog-${it.id}`} onClick={() => del(it.id)} className="text-zinc-500 hover:text-red-400 transition">
+                <button data-testid={`delete-catalog-${it.id}`} onClick={() => setPendingDelete(it)} className="text-zinc-500 hover:text-red-400 transition">
                   <Trash size={16} />
                 </button>
               )}
@@ -98,6 +106,17 @@ export default function Library() {
           </motion.div>
         ))}
       </div>
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="Delete game from library?"
+        message={pendingDelete ? `“${pendingDelete.name}” will be removed from the catalog. Past game history is kept.` : ""}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+        testid="confirm-delete-catalog"
+      />
     </div>
   );
 }

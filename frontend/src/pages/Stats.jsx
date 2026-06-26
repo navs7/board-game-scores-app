@@ -7,6 +7,7 @@ import { Trophy, Users, Clock, Trash, FileCsv, FilePdf, MagnifyingGlass, CaretDo
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import Papa from "papaparse";
+import ConfirmModal from "@/components/ConfirmModal";
 
 const ICONS = { Trophy, Medal, Crown, Shield, Fire, Lightning, Star, Target };
 
@@ -102,15 +103,22 @@ export default function Stats() {
     doc.save("game_history.pdf");
   };
 
-  const delGame = async (id) => {
-    if (!window.confirm("Delete this game record permanently?")) return;
-    await api.delete(`/history/${id}`);
-    await load();
-  };
-  const delPlayer = async (name) => {
-    if (!window.confirm(`Delete player "${name}" record?`)) return;
-    await api.delete(`/players/${encodeURIComponent(name)}`);
-    await load();
+  const [pendingDelete, setPendingDelete] = useState(null); // { kind: 'game'|'player', id|name, label }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    try {
+      if (pendingDelete.kind === "game") {
+        await api.delete(`/history/${pendingDelete.id}`);
+      } else {
+        await api.delete(`/players/${encodeURIComponent(pendingDelete.name)}`);
+      }
+      await load();
+    } catch (e) {
+      console.warn("[stats] delete failed:", e?.message);
+    } finally {
+      setPendingDelete(null);
+    }
   };
 
   const ROW_COLORS = ["#22C55E", "#FACC15", "#60A5FA", "#F472B6", "#FB923C", "#A78BFA", "#34D399", "#F87171"];
@@ -189,7 +197,7 @@ export default function Stats() {
                     <CaretDown size={18} className={`ml-auto text-zinc-500 transition-transform ${expandedGame === g.id ? "rotate-180" : ""}`} />
                   </button>
                   {user && user.role === "admin" && (
-                    <button data-testid={`delete-game-${g.id}`} onClick={() => delGame(g.id)} className="ml-3 text-zinc-500 hover:text-red-400"><Trash size={16} /></button>
+                    <button data-testid={`delete-game-${g.id}`} onClick={() => setPendingDelete({ kind: "game", id: g.id, label: g.game_name })} className="ml-3 text-zinc-500 hover:text-red-400"><Trash size={16} /></button>
                   )}
                 </div>
                 <AnimatePresence>
@@ -224,7 +232,7 @@ export default function Stats() {
                 <div className="flex items-start justify-between">
                   <div className="font-display text-xl font-bold">{p.name}</div>
                   {user && user.role === "admin" && (
-                    <button data-testid={`delete-player-${p.name}`} onClick={() => delPlayer(p.name)} className="text-zinc-500 hover:text-red-400"><Trash size={14} /></button>
+                    <button data-testid={`delete-player-${p.name}`} onClick={() => setPendingDelete({ kind: "player", name: p.name, label: p.name })} className="text-zinc-500 hover:text-red-400"><Trash size={14} /></button>
                   )}
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-4 text-center">
@@ -272,6 +280,17 @@ export default function Stats() {
           })}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title={pendingDelete?.kind === "game" ? "Delete game record?" : "Delete player record?"}
+        message={pendingDelete ? `"${pendingDelete.label}" will be removed permanently from history/stats.` : ""}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+        testid="confirm-delete-stat"
+      />
     </div>
   );
 }

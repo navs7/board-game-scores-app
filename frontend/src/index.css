@@ -46,6 +46,21 @@ h1,h2,h3,h4,h5,h6,.font-display { font-family: 'Outfit', sans-serif; letter-spac
   border-radius: 14px;
 }
 
+/* Rank-one golden row */
+.rank-one-row {
+  background: linear-gradient(135deg, #FACC15 0%, #FCD34D 50%, #F59E0B 100%);
+  box-shadow: 0 0 28px rgba(250, 204, 21, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+.rank-one-row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 30%, rgba(255,255,255,0.4) 0%, transparent 50%);
+  pointer-events: none;
+}
+
 /* Pulse live dot */
 @keyframes ping-soft {
   0% { transform: scale(1); opacity: 0.7; }

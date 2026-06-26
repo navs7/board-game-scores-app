@@ -172,6 +172,10 @@ export default function LiveScoreboard() {
                 const color = ROW_COLORS[idx % ROW_COLORS.length];
                 const flashClass = flash === "up" ? "flash-up" : (flash === "down" ? "flash-down" : "");
                 const scorePillClass = (flash === "score" || flash === "up" || flash === "down") ? "flash-yellow" : "";
+                const isLeader = idx === 0 && p.totalScore > 0;
+                const rowClass = isLeader
+                  ? "rank-one-row border-yellow-400/60"
+                  : "border-white/5 bg-white/[0.02]";
                 return (
                   <motion.div
                     layout
@@ -180,21 +184,21 @@ export default function LiveScoreboard() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: idx * 0.05, type: "spring", stiffness: 200, damping: 20 }}
                     data-testid={`player-rank-${idx + 1}`}
-                    className={`flex items-center gap-3 px-3 sm:px-4 py-3 sm:py-4 rounded-xl border border-white/5 bg-white/[0.02] ${flashClass}`}
+                    className={`flex items-center gap-3 px-3 sm:px-4 py-3 sm:py-4 rounded-xl border ${rowClass} ${flashClass}`}
                   >
-                    <div className="w-10 sm:w-12 font-display text-xl sm:text-2xl font-bold shrink-0" style={{ color: idx === 0 ? "#FACC15" : "#fff" }}>
+                    <div className="w-10 sm:w-12 font-display text-xl sm:text-2xl font-bold shrink-0" style={{ color: isLeader ? "#0a0a0a" : (idx === 0 ? "#FACC15" : "#fff") }}>
                       {idx === 0 ? <Crown size={24} weight="fill" /> : `#${idx + 1}`}
                     </div>
-                    <div className="w-1.5 h-10 sm:h-12 rounded-full shrink-0" style={{ background: color }} />
+                    <div className="w-1.5 h-10 sm:h-12 rounded-full shrink-0" style={{ background: isLeader ? "#0a0a0a" : color }} />
                     <div className="min-w-0 flex-1">
-                      <div className="font-display text-lg sm:text-xl font-semibold truncate" style={{ color }}>{p.name}</div>
+                      <div className={`font-display text-lg sm:text-xl font-semibold truncate ${isLeader ? "text-black" : ""}`} style={{ color: isLeader ? "#0a0a0a" : color }}>{p.name}</div>
                       {p.team_key && currentGame.teams?.find((t) => t.key === p.team_key) && (
-                        <div className="text-[10px] sm:text-xs text-zinc-500">Team: {currentGame.teams.find((t) => t.key === p.team_key).name}</div>
+                        <div className={`text-[10px] sm:text-xs ${isLeader ? "text-black/60" : "text-zinc-500"}`}>Team: {currentGame.teams.find((t) => t.key === p.team_key).name}</div>
                       )}
                       {p.scores && p.scores.length > 0 && (
                         <div className="hidden sm:flex flex-wrap gap-1 mt-1.5">
                           {p.scores.slice(-6).map((s, sIdx) => (
-                            <span key={`${p.key}-r${p.scores.length - 6 + sIdx}`} className="text-[10px] text-zinc-500 font-mono-num bg-white/[0.03] border border-white/5 px-1.5 py-0.5 rounded">
+                            <span key={`${p.key}-r${p.scores.length - 6 + sIdx}`} className={`text-[10px] font-mono-num border px-1.5 py-0.5 rounded ${isLeader ? "text-black/70 bg-black/10 border-black/20" : "text-zinc-500 bg-white/[0.03] border-white/5"}`}>
                               R{p.scores.length - p.scores.slice(-6).length + sIdx + 1}:{s}
                             </span>
                           ))}
@@ -203,7 +207,7 @@ export default function LiveScoreboard() {
                     </div>
                     <span
                       data-testid={`player-score-${p.key}`}
-                      className={`font-mono-num font-bold text-2xl sm:text-3xl px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl shrink-0 ${scorePillClass}`}
+                      className={`font-mono-num font-bold text-2xl sm:text-3xl px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl shrink-0 ${scorePillClass} ${isLeader ? "text-black" : ""}`}
                     >
                       {p.totalScore}
                     </span>

@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useGame } from "@/context/GameContext";
 import { Plus, X, Play, ArrowsClockwise, StopCircle, Flag, Users, UserPlus, ArrowUUpLeft } from "@phosphor-icons/react";
+import ConfirmModal from "@/components/ConfirmModal";
 
 function StartGameForm({ onStarted }) {
   const [catalog, setCatalog] = useState([]);
@@ -132,9 +133,22 @@ function StartGameForm({ onStarted }) {
   );
 }
 
-function PlayerScoreCard({ player, teamLabel }) {
+function PlayerScoreCard({ player, teamLabel, nextPlayerKey, autoFocus }) {
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const inputRef = React.useRef(null);
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [autoFocus]);
+
+  const focusNext = () => {
+    if (!nextPlayerKey) return;
+    const next = document.querySelector(`[data-testid="score-input-${nextPlayerKey}"]`);
+    if (next) next.focus();
+  };
 
   const submit = async (e) => {
     e?.preventDefault?.();
@@ -144,6 +158,8 @@ function PlayerScoreCard({ player, teamLabel }) {
     try {
       await api.post("/game/submit-score", { player_key: player.key, score: v });
       setVal("");
+      // advance focus to next player's input
+      focusNext();
     } catch (err) {
       console.warn("[admin] submit failed:", err?.message);
     } finally {
@@ -176,6 +192,7 @@ function PlayerScoreCard({ player, teamLabel }) {
       </div>
       <form onSubmit={submit} className="flex gap-2">
         <input
+          ref={inputRef}
           data-testid={`score-input-${player.key}`}
           type="number"
           step="any"
@@ -223,20 +240,34 @@ function PlayerScoreCard({ player, teamLabel }) {
   );
 }
 
+const ACTION_CONFIGS = {
+  reset: { title: "Reset all scores?", message: "All round scores will be cleared. The game stays active.", confirmLabel: "Yes, reset", danger: false, path: "/game/reset" },
+  abandon: { title: "Abandon this game?", message: "The current game will be deleted without saving to history.", confirmLabel: "Abandon", danger: true, path: "/game/abandon" },
+  end: { title: "End game and save?", message: "The winner will be determined and saved to history & player records.", confirmLabel: "End game", danger: false, path: "/game/end" },
+};
+
 function ActiveGameControls() {
   const { currentGame } = useGame();
   const [newPlayer, setNewPlayer] = useState("");
   const [newPlayerTeam, setNewPlayerTeam] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   if (!currentGame) return null;
 
   const teamMap = Object.fromEntries((currentGame.teams || []).map((t) => [t.key, t.name]));
 
-  const callAction = async (path, ok = "Done") => {
+  const runAction = async () => {
+    if (!pendingAction) return;
+    const cfg = ACTION_CONFIGS[pendingAction];
+    setActionBusy(true);
     try {
-      await api.post(path);
+      await api.post(cfg.path);
     } catch (e) {
-      console.warn("[admin] action failed:", path, e?.message);
+      console.warn("[admin] action failed:", cfg.path, e?.response?.status, e?.message);
+    } finally {
+      setActionBusy(false);
+      setPendingAction(null);
     }
   };
 
@@ -251,16 +282,25 @@ function ActiveGameControls() {
               <p className="text-xs text-zinc-500 mt-1">{currentGame.ranking_order === "highest" ? "Highest wins" : "Lowest wins"} • {currentGame.players.length} players{currentGame.use_teams ? ` • ${currentGame.teams.length} teams` : ""}</p>
             </div>
             <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2">
-              <button data-testid="reset-btn" onClick={() => { if (window.confirm("Reset all scores?")) callAction("/game/reset"); }} className="btn-ghost px-3 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5"><ArrowsClockwise size={14} /> <span className="hidden xs:inline">Reset</span><span className="xs:hidden">Reset</span></button>
-              <button data-testid="abandon-btn" onClick={() => { if (window.confirm("Abandon without saving?")) callAction("/game/abandon"); }} className="btn-danger px-3 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5"><Flag size={14} /> Abandon</button>
-              <button data-testid="end-game-btn" onClick={() => { if (window.confirm("End game and save results?")) callAction("/game/end"); }} className="btn-primary px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5 font-semibold"><StopCircle size={14} weight="fill" /> End</button>
+              <button data-testid="reset-btn" onClick={() => setPendingAction("reset")} className="btn-ghost px-3 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5"><ArrowsClockwise size={14} /> Reset</button>
+              <button data-testid="abandon-btn" onClick={() => setPendingAction("abandon")} className="btn-danger px-3 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5"><Flag size={14} /> Abandon</button>
+              <button data-testid="end-game-btn" onClick={() => setPendingAction("end")} className="btn-primary px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5 font-semibold"><StopCircle size={14} weight="fill" /> End</button>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3" data-testid="admin-score-rows">
-            {currentGame.players.map((p) => (
-              <PlayerScoreCard key={p.key} player={p} teamLabel={p.team_key ? teamMap[p.team_key] : null} />
-            ))}
+            {currentGame.players.map((p, idx) => {
+              const next = currentGame.players[idx + 1];
+              return (
+                <PlayerScoreCard
+                  key={p.key}
+                  player={p}
+                  teamLabel={p.team_key ? teamMap[p.team_key] : null}
+                  nextPlayerKey={next ? next.key : null}
+                  autoFocus={idx === 0}
+                />
+              );
+            })}
           </div>
 
           <div className="mt-5 pt-5 border-t border-white/5">
@@ -291,6 +331,17 @@ function ActiveGameControls() {
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!pendingAction}
+        title={pendingAction ? ACTION_CONFIGS[pendingAction].title : ""}
+        message={pendingAction ? ACTION_CONFIGS[pendingAction].message : ""}
+        confirmLabel={pendingAction ? (actionBusy ? "Working…" : ACTION_CONFIGS[pendingAction].confirmLabel) : "OK"}
+        danger={pendingAction ? ACTION_CONFIGS[pendingAction].danger : false}
+        onConfirm={runAction}
+        onCancel={() => !actionBusy && setPendingAction(null)}
+        testid={`confirm-${pendingAction || "none"}`}
+      />
     </div>
   );
 }
