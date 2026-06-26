@@ -1,0 +1,90 @@
+{
+  "theme_and_archetype": {
+    "theme": "dark",
+    "archetype": "Performance Pro (Archetype 2)",
+    "rationale": "High energy, tactical minimalism, command-center focus for the live scoreboard and admin panel. Absolute clarity for real-time data."
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "IBM Plex Sans",
+    "rules": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter font-bold",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "labels": "text-xs tracking-[0.2em] uppercase font-bold",
+      "body": "text-base leading-relaxed text-zinc-400"
+    }
+  },
+  "colors": {
+    "background": "#0A0A0A",
+    "surface": "#111111",
+    "surface_glass": "bg-black/60 backdrop-blur-xl border border-white/10",
+    "primary": "#007AFF",
+    "accent_up": "#22C55E",
+    "accent_down": "#EF4444",
+    "accent_live": "#FACC15",
+    "text_primary": "#FFFFFF",
+    "text_secondary": "#A1A1AA",
+    "border": "#27272A"
+  },
+  "layout_and_spacing": {
+    "philosophy": "Generous Spacing vs Dense Control Room",
+    "grids": {
+      "game_library": "Tetris grid pattern. Base: grid-cols-1 md:grid-cols-2 lg:grid-cols-3. Wide gaps (gap-8).",
+      "admin_dashboard": "Control Room grid. Tight gaps (gap-4). Dense, full pixel utilization. No jagged bottoms.",
+      "live_scoreboard": "Control Room grid focused on horizontal player rank rows. gap-4."
+    },
+    "containers": "Containers with borders MUST have generous internal padding (p-6 or p-8)."
+  },
+  "surface_strategies": {
+    "qr_code_modal": "Glassmorphism. backdrop-blur-2xl bg-black/60 border border-white/10. Ambient shadow.",
+    "stats_tables": "Grid Borders (Technical Look). Expose the skeleton. border-collapse with subtle right/bottom borders on grid items.",
+    "active_game_card": "The Tracing Beam effect. Subtle moving gradient border to signal 'Active/Live'.",
+    "admin_controls": "Flat solid surfaces. 1px subtle border. High contrast on focus states."
+  },
+  "motion_and_interactions": {
+    "live_updates": {
+      "rank_change": "Framer Motion layout animations. Flash row background to accent_up/down temporarily on rank shift.",
+      "score_pill": "Background flash to accent_live (#FACC15) decaying to transparent over 1.5s.",
+      "live_badge": "animate-pulse on a 6px circular dot, plus an outer pinging ring.",
+      "waiting_screen": "CSS/Framer motion animation of orbiting dice around a central logo. Smooth infinite rotation."
+    },
+    "hover_states": "translate-y-[-2px] with increased shadow and text color brightening. Never rely on inheritance.",
+    "focus_states": "focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background"
+  },
+  "component_instructions": {
+    "cards": "Flat background, 1px subtle border, no heavy drop-shadows. Minimalist geometry.",
+    "tables": "Use Shadcn Table. Apply F-Pattern scanning logic. Emphasize the 'North Star' metric (Score/Wins). Allow expandable rows for game history breakdowns.",
+    "forms_inputs": "Use Shadcn components heavily customized to match the dark theme. Deep dark backgrounds, high-contrast borders.",
+    "badges": "For achievements/team modes: high-contrast geometric pills. No soft pastels."
+  },
+  "media_and_assets": {
+    "icons_library": "@phosphor-icons/react",
+    "image_urls": [
+      {
+        "category": "background_texture",
+        "url": "https://images.unsplash.com/photo-1578662996442-48f60103fc96?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGRhcmslMjBtb2RlJTIwdGV4dHVyZXxlbnwwfHx8fDE3ODI0NjkzNDR8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract dark texture for live scoreboard background overlay"
+      },
+      {
+        "category": "game_library_placeholder",
+        "url": "https://images.pexels.com/photos/776657/pexels-photo-776657.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Close-up of board game pieces for game library cards"
+      }
+    ]
+  },
+  "testing": {
+    "data_testid_rule": "All interactive and key informational elements MUST include a data-testid attribute. E.g., data-testid='submit-score-button', data-testid='player-rank-1'."
+  },
+  "instructions_to_main_agent": [
+    "Install 'framer-motion' and '@phosphor-icons/react'.",
+    "Note: Ensure to use .js/.jsx extensions for React files, not .tsx.",
+    "Configure Tailwind with the specified color palette and fonts (Outfit for headings, IBM Plex Sans for body).",
+    "Do NOT use HTML input type='date' or basic select. Use Shadcn components for all forms.",
+    "Implement WebSockets securely for real-time live scoreboard updates.",
+    "Ensure the QR Code generation uses a valid library and places the code inside the defined Glassmorphism modal.",
+    "Implement the Game Timer & Turn Tracker with bold, technical typography (Outfit).",
+    "For PDF/CSV export, ensure buttons are clearly visible and styled with the Primary color.",
+    "CRITICAL: Follow the data-testid rules for every interactive component to ensure robust testing."
+  ]
+}
