@@ -1,89 +1,602 @@
-from fastapi import FastAPI, APIRouter
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+import os
+import uuid
+import logging
+import asyncio
+import secrets
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
+
+import bcrypt
+import jwt
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, EmailStr
+
+# -------------------------
+# Setup
+# -------------------------
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
-app = FastAPI()
+JWT_ALGORITHM = "HS256"
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+def get_jwt_secret() -> str:
+    return os.environ["JWT_SECRET"]
 
+app = FastAPI(title="Board Game Score API")
+api = APIRouter(prefix="/api")
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+# -------------------------
+# Password / JWT
+# -------------------------
+def hash_password(p: str) -> str:
+    return bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode()
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+def verify_password(p: str, h: str) -> bool:
+    try:
+        return bcrypt.checkpw(p.encode(), h.encode())
+    except Exception:
+        return False
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+def create_access_token(user_id: str, email: str) -> str:
+    payload = {"sub": user_id, "email": email, "exp": datetime.now(timezone.utc) + timedelta(minutes=60), "type": "access"}
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+def create_refresh_token(user_id: str) -> str:
+    payload = {"sub": user_id, "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "refresh"}
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
-# Include the router in the main app
-app.include_router(api_router)
+def set_auth_cookies(resp: Response, access: str, refresh: str):
+    resp.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=3600, path="/")
+    resp.set_cookie("refresh_token", refresh, httponly=True, secure=False, samesite="lax", max_age=604800, path="/")
+
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return user
+
+# -------------------------
+# Models
+# -------------------------
+class RegisterReq(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+class LoginReq(BaseModel):
+    email: EmailStr
+    password: str
+
+class GameCatalogIn(BaseModel):
+    name: str
+    description: str = ""
+    default_ranking: str = "highest"  # highest | lowest
+    icon: str = "Dice"
+
+class StartGameReq(BaseModel):
+    game_name: str
+    catalog_id: Optional[str] = None
+    ranking_order: str = "highest"  # highest | lowest
+    players: List[str] = []  # names
+    use_teams: bool = False
+    teams: List[Dict[str, Any]] = []  # [{name, player_names: [...]}]
+    enable_timer: bool = False
+    turn_duration_sec: int = 60
+
+class AddPlayerReq(BaseModel):
+    name: str
+    team_key: Optional[str] = None
+
+class SubmitScoreReq(BaseModel):
+    player_key: str
+    score: float
+    round_num: Optional[int] = None  # if None, append a new round
+
+class NextTurnReq(BaseModel):
+    pass
+
+# -------------------------
+# WS manager
+# -------------------------
+class ConnectionManager:
+    def __init__(self):
+        self.active: List[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active:
+            self.active.remove(ws)
+
+    async def broadcast(self, message: dict):
+        dead = []
+        for ws in self.active:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+manager = ConnectionManager()
+
+# -------------------------
+# Helpers
+# -------------------------
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+async def get_current_game() -> Optional[dict]:
+    doc = await db.current_game.find_one({"key": "current"}, {"_id": 0})
+    return doc
+
+async def broadcast_current_game():
+    g = await get_current_game()
+    await manager.broadcast({"type": "current_game", "data": g})
+
+# Achievements computation
+ACHIEVEMENT_DEFS = [
+    {"id": "first_win", "name": "First Victory", "desc": "Won your first game", "icon": "Trophy"},
+    {"id": "five_wins", "name": "High Roller", "desc": "Won 5 games", "icon": "Medal"},
+    {"id": "ten_wins", "name": "Champion", "desc": "Won 10 games", "icon": "Crown"},
+    {"id": "veteran", "name": "Veteran", "desc": "Played 25 games", "icon": "Shield"},
+    {"id": "streak3", "name": "Hat Trick", "desc": "Win 3 games in a row", "icon": "Fire"},
+    {"id": "streak5", "name": "Unstoppable", "desc": "Win 5 games in a row", "icon": "Lightning"},
+    {"id": "century", "name": "Century Club", "desc": "Scored 100+ in a single game", "icon": "Star"},
+    {"id": "perfectionist", "name": "Win Rate 75%+", "desc": "Maintain a 75% win rate (min 5 games)", "icon": "Target"},
+]
+
+def compute_achievements(record: dict) -> List[str]:
+    out = []
+    wins = record.get("wins", 0)
+    games = record.get("gamesPlayed", 0)
+    streak = record.get("currentStreak", 0)
+    best_score = record.get("bestSingleScore", 0)
+    if wins >= 1: out.append("first_win")
+    if wins >= 5: out.append("five_wins")
+    if wins >= 10: out.append("ten_wins")
+    if games >= 25: out.append("veteran")
+    if streak >= 3 or record.get("bestStreak", 0) >= 3: out.append("streak3")
+    if streak >= 5 or record.get("bestStreak", 0) >= 5: out.append("streak5")
+    if best_score >= 100: out.append("century")
+    if games >= 5 and (wins / games) >= 0.75: out.append("perfectionist")
+    return out
+
+# -------------------------
+# Auth Endpoints
+# -------------------------
+@api.post("/auth/register")
+async def register(body: RegisterReq, response: Response):
+    email = body.email.lower()
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    uid = str(uuid.uuid4())
+    doc = {
+        "id": uid,
+        "email": email,
+        "password_hash": hash_password(body.password),
+        "name": body.name,
+        "role": "user",
+        "created_at": now_iso(),
+    }
+    await db.users.insert_one(doc)
+    set_auth_cookies(response, create_access_token(uid, email), create_refresh_token(uid))
+    return {"id": uid, "email": email, "name": body.name, "role": "user"}
+
+@api.post("/auth/login")
+async def login(body: LoginReq, request: Request, response: Response):
+    email = body.email.lower()
+    ident = f"{request.client.host}:{email}"
+    # brute force check
+    rec = await db.login_attempts.find_one({"identifier": ident})
+    if rec and rec.get("locked_until"):
+        locked_until = datetime.fromisoformat(rec["locked_until"])
+        if locked_until > datetime.now(timezone.utc):
+            raise HTTPException(status_code=429, detail="Too many failed attempts. Try later.")
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user["password_hash"]):
+        attempts = (rec or {}).get("attempts", 0) + 1
+        update = {"identifier": ident, "attempts": attempts}
+        if attempts >= 5:
+            update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+            update["attempts"] = 0
+        await db.login_attempts.update_one({"identifier": ident}, {"$set": update}, upsert=True)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    await db.login_attempts.delete_one({"identifier": ident})
+    set_auth_cookies(response, create_access_token(user["id"], email), create_refresh_token(user["id"]))
+    return {"id": user["id"], "email": user["email"], "name": user.get("name"), "role": user.get("role", "user")}
+
+@api.post("/auth/logout")
+async def logout(response: Response, _user: dict = Depends(get_current_user)):
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
+
+@api.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return user
+
+@api.post("/auth/refresh")
+async def refresh(request: Request, response: Response):
+    token = request.cookies.get("refresh_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    try:
+        payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+        user = await db.users.find_one({"id": payload["sub"]})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        access = create_access_token(user["id"], user["email"])
+        response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax", max_age=3600, path="/")
+        return {"ok": True}
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+# -------------------------
+# Game Catalog (library)
+# -------------------------
+@api.get("/catalog")
+async def list_catalog():
+    items = await db.games_catalog.find({}, {"_id": 0}).to_list(500)
+    return items
+
+@api.post("/catalog")
+async def add_catalog(body: GameCatalogIn, user: dict = Depends(require_admin)):
+    cid = str(uuid.uuid4())
+    doc = {"id": cid, "name": body.name, "description": body.description, "default_ranking": body.default_ranking, "icon": body.icon, "created_at": now_iso(), "play_count": 0}
+    await db.games_catalog.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+@api.delete("/catalog/{cid}")
+async def delete_catalog(cid: str, user: dict = Depends(require_admin)):
+    await db.games_catalog.delete_one({"id": cid})
+    return {"ok": True}
+
+# -------------------------
+# Current Game (admin)
+# -------------------------
+@api.get("/game/current")
+async def current_game():
+    g = await get_current_game()
+    return g
+
+@api.post("/game/start")
+async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
+    players = []
+    for pname in body.players:
+        players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": None})
+    teams = []
+    if body.use_teams and body.teams:
+        for t in body.teams:
+            tk = str(uuid.uuid4())
+            teams.append({"key": tk, "name": t.get("name", "Team"), "totalScore": 0})
+            for pname in t.get("player_names", []):
+                players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": tk})
+    doc = {
+        "key": "current",
+        "id": str(uuid.uuid4()),
+        "game_name": body.game_name,
+        "catalog_id": body.catalog_id,
+        "ranking_order": body.ranking_order,
+        "status": "active",
+        "players": players,
+        "teams": teams,
+        "use_teams": body.use_teams,
+        "rounds": [],
+        "started_at": now_iso(),
+        "current_turn_idx": 0,
+        "enable_timer": body.enable_timer,
+        "turn_duration_sec": body.turn_duration_sec,
+        "turn_started_at": now_iso() if body.enable_timer else None,
+    }
+    await db.current_game.replace_one({"key": "current"}, doc, upsert=True)
+    if body.catalog_id:
+        await db.games_catalog.update_one({"id": body.catalog_id}, {"$inc": {"play_count": 1}})
+    await broadcast_current_game()
+    doc.pop("_id", None)
+    return doc
+
+@api.post("/game/add-player")
+async def add_player(body: AddPlayerReq, user: dict = Depends(require_admin)):
+    g = await get_current_game()
+    if not g or g.get("status") != "active":
+        raise HTTPException(status_code=400, detail="No active game")
+    new_p = {"key": str(uuid.uuid4()), "name": body.name.strip(), "totalScore": 0, "team_key": body.team_key}
+    await db.current_game.update_one({"key": "current"}, {"$push": {"players": new_p}})
+    await broadcast_current_game()
+    return new_p
+
+@api.post("/game/submit-score")
+async def submit_score(body: SubmitScoreReq, user: dict = Depends(require_admin)):
+    g = await get_current_game()
+    if not g or g.get("status") != "active":
+        raise HTTPException(status_code=400, detail="No active game")
+    rounds = g.get("rounds", [])
+    if body.round_num is None:
+        round_num = (rounds[-1]["round_num"] + 1) if rounds else 1
+        rounds.append({"round_num": round_num, "scores": {body.player_key: body.score}})
+    else:
+        # update existing round
+        found = False
+        for r in rounds:
+            if r["round_num"] == body.round_num:
+                r["scores"][body.player_key] = body.score
+                found = True
+                break
+        if not found:
+            rounds.append({"round_num": body.round_num, "scores": {body.player_key: body.score}})
+    # recompute totals
+    players = g["players"]
+    for p in players:
+        p["totalScore"] = sum(r["scores"].get(p["key"], 0) for r in rounds)
+    # team totals
+    teams = g.get("teams", [])
+    for t in teams:
+        t["totalScore"] = sum(p["totalScore"] for p in players if p.get("team_key") == t["key"])
+    await db.current_game.update_one({"key": "current"}, {"$set": {"rounds": rounds, "players": players, "teams": teams}})
+    await broadcast_current_game()
+    return {"ok": True}
+
+@api.post("/game/next-turn")
+async def next_turn(user: dict = Depends(require_admin)):
+    g = await get_current_game()
+    if not g or g.get("status") != "active":
+        raise HTTPException(status_code=400, detail="No active game")
+    n = len(g["players"])
+    if n == 0:
+        return {"ok": True}
+    new_idx = (g.get("current_turn_idx", 0) + 1) % n
+    await db.current_game.update_one({"key": "current"}, {"$set": {"current_turn_idx": new_idx, "turn_started_at": now_iso()}})
+    await broadcast_current_game()
+    return {"current_turn_idx": new_idx}
+
+@api.post("/game/reset")
+async def reset_game(user: dict = Depends(require_admin)):
+    g = await get_current_game()
+    if not g:
+        raise HTTPException(status_code=400, detail="No active game")
+    for p in g["players"]:
+        p["totalScore"] = 0
+    for t in g.get("teams", []):
+        t["totalScore"] = 0
+    await db.current_game.update_one({"key": "current"}, {"$set": {"rounds": [], "players": g["players"], "teams": g.get("teams", []), "current_turn_idx": 0, "turn_started_at": now_iso() if g.get("enable_timer") else None}})
+    await broadcast_current_game()
+    return {"ok": True}
+
+@api.post("/game/abandon")
+async def abandon_game(user: dict = Depends(require_admin)):
+    await db.current_game.delete_one({"key": "current"})
+    await manager.broadcast({"type": "current_game", "data": None})
+    return {"ok": True}
+
+@api.post("/game/end")
+async def end_game(user: dict = Depends(require_admin)):
+    g = await get_current_game()
+    if not g or g.get("status") != "active":
+        raise HTTPException(status_code=400, detail="No active game")
+    ranking = g["ranking_order"]
+    players = sorted(g["players"], key=lambda p: p["totalScore"], reverse=(ranking == "highest"))
+    if g.get("use_teams"):
+        teams_sorted = sorted(g.get("teams", []), key=lambda t: t["totalScore"], reverse=(ranking == "highest"))
+        winner_label = teams_sorted[0]["name"] if teams_sorted else "—"
+    else:
+        winner_label = players[0]["name"] if players else "—"
+    history_doc = {
+        "id": str(uuid.uuid4()),
+        "game_name": g["game_name"],
+        "catalog_id": g.get("catalog_id"),
+        "ranking_order": ranking,
+        "ended_at": now_iso(),
+        "started_at": g.get("started_at"),
+        "winner_label": winner_label,
+        "players": [{"name": p["name"], "totalScore": p["totalScore"], "team_key": p.get("team_key")} for p in players],
+        "teams": g.get("teams", []),
+        "use_teams": g.get("use_teams", False),
+        "rounds": g.get("rounds", []),
+    }
+    await db.game_history.insert_one(history_doc)
+
+    # Update player records
+    winner_player_keys = set()
+    if g.get("use_teams"):
+        if teams_sorted:
+            winning_team = teams_sorted[0]["key"]
+            winner_player_keys = {p["key"] for p in g["players"] if p.get("team_key") == winning_team}
+    else:
+        if players:
+            winner_player_keys = {players[0]["key"]}
+
+    for p in g["players"]:
+        pname = p["name"]
+        is_winner = p["key"] in winner_player_keys
+        score = p["totalScore"]
+        rec = await db.player_records.find_one({"name": pname})
+        if not rec:
+            rec = {"name": pname, "gamesPlayed": 0, "wins": 0, "totalScore": 0, "bestSingleScore": 0, "currentStreak": 0, "bestStreak": 0, "lastPlayed": now_iso(), "achievements": []}
+        rec["gamesPlayed"] += 1
+        rec["totalScore"] += score
+        rec["bestSingleScore"] = max(rec.get("bestSingleScore", 0), score)
+        rec["lastPlayed"] = now_iso()
+        if is_winner:
+            rec["wins"] = rec.get("wins", 0) + 1
+            rec["currentStreak"] = rec.get("currentStreak", 0) + 1
+            rec["bestStreak"] = max(rec.get("bestStreak", 0), rec["currentStreak"])
+        else:
+            rec["currentStreak"] = 0
+        rec["achievements"] = compute_achievements(rec)
+        rec.pop("_id", None)
+        await db.player_records.update_one({"name": pname}, {"$set": rec}, upsert=True)
+
+    await db.current_game.delete_one({"key": "current"})
+    await manager.broadcast({"type": "current_game", "data": None})
+    await manager.broadcast({"type": "game_ended", "data": {"id": history_doc["id"], "winner": winner_label}})
+    history_doc.pop("_id", None)
+    return history_doc
+
+# -------------------------
+# History & Records
+# -------------------------
+@api.get("/history")
+async def get_history(limit: int = 100, catalog_id: Optional[str] = None):
+    q = {}
+    if catalog_id:
+        q["catalog_id"] = catalog_id
+    items = await db.game_history.find(q, {"_id": 0}).sort("ended_at", -1).to_list(limit)
+    return items
+
+@api.delete("/history/{gid}")
+async def delete_history(gid: str, user: dict = Depends(require_admin)):
+    await db.game_history.delete_one({"id": gid})
+    return {"ok": True}
+
+@api.get("/players")
+async def get_players():
+    items = await db.player_records.find({}, {"_id": 0}).to_list(1000)
+    for it in items:
+        gp = it.get("gamesPlayed", 0)
+        it["winRate"] = (it.get("wins", 0) / gp) if gp else 0
+        it["avgScore"] = (it.get("totalScore", 0) / gp) if gp else 0
+    return items
+
+@api.get("/players/{name}")
+async def get_player(name: str):
+    rec = await db.player_records.find_one({"name": name}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Player not found")
+    history = await db.game_history.find({"players.name": name}, {"_id": 0}).sort("ended_at", -1).to_list(200)
+    return {"record": rec, "history": history}
+
+@api.delete("/players/{name}")
+async def delete_player(name: str, user: dict = Depends(require_admin)):
+    await db.player_records.delete_one({"name": name})
+    return {"ok": True}
+
+@api.get("/achievements/definitions")
+async def achievement_defs():
+    return ACHIEVEMENT_DEFS
+
+# -------------------------
+# WebSocket
+# -------------------------
+@app.websocket("/api/ws")
+async def ws_endpoint(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        # send initial state
+        g = await get_current_game()
+        await ws.send_json({"type": "current_game", "data": g})
+        while True:
+            await ws.receive_text()  # heartbeat or ignored
+    except WebSocketDisconnect:
+        manager.disconnect(ws)
+    except Exception:
+        manager.disconnect(ws)
+
+# -------------------------
+# Startup
+# -------------------------
+async def seed_admin():
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@boardgame.app").lower()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    existing = await db.users.find_one({"email": admin_email})
+    if not existing:
+        uid = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": uid,
+            "email": admin_email,
+            "password_hash": hash_password(admin_password),
+            "name": "Admin",
+            "role": "admin",
+            "created_at": now_iso(),
+        })
+        logger.info("Seeded admin user: %s", admin_email)
+    else:
+        if not verify_password(admin_password, existing["password_hash"]):
+            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}})
+            logger.info("Updated admin password")
+        elif existing.get("role") != "admin":
+            await db.users.update_one({"email": admin_email}, {"$set": {"role": "admin"}})
+
+async def seed_catalog():
+    count = await db.games_catalog.count_documents({})
+    if count == 0:
+        defaults = [
+            {"name": "Catan", "description": "Trade, build, settle.", "default_ranking": "highest", "icon": "Cube"},
+            {"name": "Monopoly", "description": "Buy, sell, dominate.", "default_ranking": "highest", "icon": "MoneyWavy"},
+            {"name": "Scrabble", "description": "Word-building classic.", "default_ranking": "highest", "icon": "Alphabet"},
+            {"name": "Golf (Cards)", "description": "Lowest score wins.", "default_ranking": "lowest", "icon": "Cards"},
+            {"name": "Yahtzee", "description": "Dice combinations.", "default_ranking": "highest", "icon": "DiceFive"},
+        ]
+        for d in defaults:
+            d["id"] = str(uuid.uuid4())
+            d["created_at"] = now_iso()
+            d["play_count"] = 0
+        await db.games_catalog.insert_many(defaults)
+        logger.info("Seeded catalog with %d default games", len(defaults))
+
+@app.on_event("startup")
+async def startup():
+    await db.users.create_index("email", unique=True)
+    await db.users.create_index("id", unique=True)
+    await db.login_attempts.create_index("identifier")
+    await db.games_catalog.create_index("id", unique=True)
+    await db.game_history.create_index("id", unique=True)
+    await db.game_history.create_index("ended_at")
+    await db.player_records.create_index("name", unique=True)
+    await seed_admin()
+    await seed_catalog()
+
+@app.on_event("shutdown")
+async def shutdown():
+    client.close()
+
+# -------------------------
+# Mount
+# -------------------------
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=".*",
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
