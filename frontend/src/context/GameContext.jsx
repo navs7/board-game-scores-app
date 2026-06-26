@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, wsUrl } from "@/lib/api";
 
 const GameCtx = createContext(null);
@@ -55,8 +55,10 @@ export function GameProvider({ children }) {
     };
   }, []);
 
+  const value = useMemo(() => ({ currentGame, connected }), [currentGame, connected]);
+
   return (
-    <GameCtx.Provider value={{ currentGame, connected }}>
+    <GameCtx.Provider value={value}>
       {children}
     </GameCtx.Provider>
   );

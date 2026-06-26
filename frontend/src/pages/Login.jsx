@@ -71,7 +71,10 @@ export default function Login() {
           )}
 
           <button data-testid="submit-auth-btn" disabled={busy} type="submit" className="btn-primary w-full py-3 rounded-lg font-semibold disabled:opacity-50">
-            {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
+            {(() => {
+              if (busy) return "Working…";
+              return mode === "login" ? "Sign in" : "Create account";
+            })()}
           </button>
         </form>
 

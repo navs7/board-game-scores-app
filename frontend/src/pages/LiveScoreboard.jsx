@@ -170,6 +170,8 @@ export default function LiveScoreboard() {
               {sortedPlayers.map((p, idx) => {
                 const flash = flashes[p.key];
                 const color = ROW_COLORS[idx % ROW_COLORS.length];
+                const flashClass = flash === "up" ? "flash-up" : (flash === "down" ? "flash-down" : "");
+                const scorePillClass = (flash === "score" || flash === "up" || flash === "down") ? "flash-yellow" : "";
                 return (
                   <motion.div
                     layout
@@ -178,7 +180,7 @@ export default function LiveScoreboard() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: idx * 0.05, type: "spring", stiffness: 200, damping: 20 }}
                     data-testid={`player-rank-${idx + 1}`}
-                    className={`flex items-center gap-3 px-3 sm:px-4 py-3 sm:py-4 rounded-xl border border-white/5 bg-white/[0.02] ${flash === "up" ? "flash-up" : flash === "down" ? "flash-down" : ""}`}
+                    className={`flex items-center gap-3 px-3 sm:px-4 py-3 sm:py-4 rounded-xl border border-white/5 bg-white/[0.02] ${flashClass}`}
                   >
                     <div className="w-10 sm:w-12 font-display text-xl sm:text-2xl font-bold shrink-0" style={{ color: idx === 0 ? "#FACC15" : "#fff" }}>
                       {idx === 0 ? <Crown size={24} weight="fill" /> : `#${idx + 1}`}
@@ -201,7 +203,7 @@ export default function LiveScoreboard() {
                     </div>
                     <span
                       data-testid={`player-score-${p.key}`}
-                      className={`font-mono-num font-bold text-2xl sm:text-3xl px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl shrink-0 ${flash === "score" || flash === "up" || flash === "down" ? "flash-yellow" : ""}`}
+                      className={`font-mono-num font-bold text-2xl sm:text-3xl px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl shrink-0 ${scorePillClass}`}
                     >
                       {p.totalScore}
                     </span>

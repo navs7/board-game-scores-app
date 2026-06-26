@@ -3,14 +3,32 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-// Token is also issued as httpOnly cookie by the backend; this in-memory
-// fallback is used only when 3rd-party cookies are blocked (e.g. preview
-// environments where the API runs on a different subdomain). It is kept
-// in memory + sessionStorage (cleared on tab close) to limit XSS exposure.
+/**
+ * Token storage strategy
+ * ----------------------
+ * Primary mechanism: JWT issued in `Authorization: Bearer` header.
+ *
+ * The backend ALSO sets `access_token` / `refresh_token` as httpOnly cookies
+ * which would be the more secure transport — however, the K8s ingress
+ * forces `Access-Control-Allow-Origin: *` which forbids credentialed XHR.
+ * Until that infra constraint changes, this app cannot use cookie auth
+ * across origins and must use Bearer tokens.
+ *
+ * Tokens live in BOTH:
+ *   - in-memory module variable (`_token`) — the primary read path
+ *   - sessionStorage — only as a survive-page-reload mechanism. Cleared on
+ *     tab close, so the persistence window is smaller than localStorage.
+ *
+ * XSS mitigation rests on the app's standard React escaping + CSP layer;
+ * this is not an environment that calls `dangerouslySetInnerHTML` with
+ * untrusted input.
+ */
 const TOKEN_KEY = "bgs_token";
 
 let _token = null;
-try { _token = sessionStorage.getItem(TOKEN_KEY); } catch (e) {
+try {
+  _token = sessionStorage.getItem(TOKEN_KEY);
+} catch (e) {
   console.warn("[api] sessionStorage unavailable:", e?.message);
 }
 
@@ -27,8 +45,6 @@ export function setToken(t) {
 
 export const api = axios.create({
   baseURL: API,
-  // withCredentials disabled: ingress CORS uses wildcard `*` which conflicts
-  // with credentialed XHR. Auth uses JWT Bearer header instead.
   withCredentials: false,
 });
 

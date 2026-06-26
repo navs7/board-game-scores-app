@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, setToken } from "@/lib/api";
 
 const AuthCtx = createContext(null);
@@ -37,11 +37,12 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
-  return (
-    <AuthCtx.Provider value={{ user, loading, login, register, logout, setUser }}>
-      {children}
-    </AuthCtx.Provider>
+  const value = useMemo(
+    () => ({ user, loading, login, register, logout, setUser }),
+    [user, loading]
   );
+
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);
