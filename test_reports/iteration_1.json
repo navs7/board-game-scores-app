@@ -1,0 +1,43 @@
+{
+  "summary": "Comprehensive backend + frontend testing of Board Game Score (React+FastAPI+Mongo+JWT+WebSockets). Backend: 17/18 pytest tests pass. Only failure is brute-force lockout (real bug — uses request.client.host which is K8s ingress IP that varies per request, so attempts never accumulate to 5). Frontend: full e2e admin flow works — login → start game → submit scores → next turn → end game → history; library catalog add works; stats 4 tabs render; export buttons present; WS waiting screen on /. No console errors during flows.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/login", "issue": "Brute-force lockout never triggers behind K8s ingress. backend uses request.client.host which varies (saw 10.227.7.2 and 10.227.7.6 alternating in db.login_attempts for the same external client+email). Need to honor X-Forwarded-For / X-Real-IP. Currently the 5-fail lockout protection is effectively disabled in production-like environments."},
+      {"endpoint": "/api/auth/login", "issue": "On the 5th failed attempt, code sets locked_until AND resets attempts=0 but still returns 401 rather than 429 on that same response. Minor UX nit — the 5th failure is silently the trigger; the user only sees 429 on the 6th. Consider returning 429 directly on the locking attempt."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin active game", "issues": ["Crown icon appears next to the player at current_turn_idx rather than the current leader by score. With Highest-wins selected, the crown sits on Bob (15) instead of Carol (20). If intended as a turn indicator it's fine; if it's meant to mark the leader it's misleading."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_board_game_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix brute-force IP detection: derive client IP from X-Forwarded-For (first hop) / X-Real-IP header in /api/auth/login so the 5-fail lockout actually works behind the K8s ingress.",
+    "(Optional polish) Return 429 on the attempt that triggers the lock, not only on subsequent attempts.",
+    "(Optional UX) Clarify crown icon semantics on Admin live game card (turn indicator vs leader)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~600 lines and starting to mix concerns (auth, catalog, game, history, players, WS). Consider splitting into routers (auth.py, game.py, catalog.py, ws.py) before it grows further.",
+    "Cookie security flags use secure=False with samesite=lax — fine for the preview environment, but for prod should be secure=True + samesite=none (since frontend and API are on the same eTLD here it's currently OK).",
+    "Login lockout uses request.client.host; behind any reverse proxy this gives the proxy IP. Use X-Forwarded-For with a trusted-proxy check.",
+    "/api/auth/refresh only reads the cookie; the frontend uses Bearer-only flow and stores no refresh token, so refresh effectively requires the httpOnly cookie to still be present. Works because login does set the cookie too, but worth documenting.",
+    "broadcast_current_game() sends None when there is no current game (good). However ws_endpoint loops on receive_text() — clients that don't send heartbeats are fine, but any binary frame would crash silently. Acceptable for now."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_board_game_api.py (new)"
+  ],
+  "success_rate": {"backend": "94% (17/18)", "frontend": "100% (all flows passed)"},
+  "test_credentials": "admin@boardgame.app / admin123 (verified working, role=admin, access_token returned, password_hash NOT in response)",
+  "seed_data_creation": "Created and deleted TEST_ prefixed catalog/history/players during tests. Cleaned up after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests run with `pytest backend/tests/test_board_game_api.py -n 0` (serial). The default pytest.ini uses -n 2 --dist loadscope which races on the single global current_game doc — tests must use -n 0 OR be redesigned to isolate state. WebSocket tests use wss:// derived from REACT_APP_BACKEND_URL. Frontend e2e via the admin UI works end-to-end. Public scoreboard (/) shows waiting screen with orbiting dice when no current_game.",
+  "rca of the issue": "Brute-force lockout failure RCA: db.login_attempts stores identifier=f'{request.client.host}:{email}'. In a K8s ingress / load-balancer environment, FastAPI's request.client.host receives the connection-level peer IP, which is the ingress/nginx pod IP and varies across connections (observed 10.227.7.2 and 10.227.7.6 alternating for the same external client). Each new IP gets a fresh attempts counter, so 5 fails never accumulate against one record and locked_until is never set. Mitigation: read X-Forwarded-For (split by comma, take leftmost) or X-Real-IP, with a trusted-proxy allowlist; fallback to request.client.host only when headers are absent. Reproduction: POST /api/auth/login with wrong password for the same email 10x from the same external client → no 429 returned, db shows multiple identifier rows each with attempts < 5."
+}

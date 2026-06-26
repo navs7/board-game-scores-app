@@ -64,7 +64,7 @@ function ShareModal({ onClose }) {
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch (e) {}
+    } catch (e) { /* clipboard unavailable */ }
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" data-testid="share-modal">

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, setToken } from "@/lib/api";
 
 const AuthCtx = createContext(null);
 
@@ -17,18 +17,23 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const { data } = await api.post("/auth/login", { email, password });
+    if (data.access_token) setToken(data.access_token);
     setUser(data);
     return data;
   };
   const register = async (email, password, name) => {
     const { data } = await api.post("/auth/register", { email, password, name });
+    if (data.access_token) setToken(data.access_token);
     setUser(data);
     return data;
   };
   const logout = async () => {
     try {
       await api.post("/auth/logout");
-    } catch (e) {}
+    } catch (e) {
+      /* ignore */
+    }
+    setToken(null);
     setUser(false);
   };
 

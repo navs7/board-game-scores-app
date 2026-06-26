@@ -13,7 +13,7 @@ export function GameProvider({ children }) {
     api
       .get("/game/current")
       .then((r) => setCurrentGame(r.data || null))
-      .catch(() => {});
+      .catch(() => { /* ignore */ });
 
     let cancelled = false;
     function connect() {
@@ -25,20 +25,20 @@ export function GameProvider({ children }) {
         try {
           const msg = JSON.parse(evt.data);
           if (msg.type === "current_game") setCurrentGame(msg.data || null);
-        } catch (e) {}
+        } catch (e) { /* ignore */ }
       };
       ws.onclose = () => {
         setConnected(false);
         setTimeout(connect, 2000);
       };
       ws.onerror = () => {
-        try { ws.close(); } catch (e) {}
+        try { ws.close(); } catch (e) { /* ignore */ }
       };
     }
     connect();
     return () => {
       cancelled = true;
-      try { wsRef.current && wsRef.current.close(); } catch (e) {}
+      try { wsRef.current && wsRef.current.close(); } catch (e) { /* ignore */ }
     };
   }, []);
 
