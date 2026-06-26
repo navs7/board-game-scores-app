@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useGame } from "@/context/GameContext";
 import { motion } from "framer-motion";
-import { Plus, X, Play, ArrowsClockwise, StopCircle, Flag, Users, UserPlus, SkipForward, Crown } from "@phosphor-icons/react";
+import { Plus, X, Play, ArrowsClockwise, StopCircle, Flag, Users, UserPlus, SkipForward, Clock } from "@phosphor-icons/react";
 
 function StartGameForm({ onStarted }) {
   const [catalog, setCatalog] = useState([]);
@@ -184,7 +184,7 @@ function ActiveGameControls() {
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <div className="font-display text-lg font-semibold flex items-center gap-2">
-                        {isTurn && <Crown size={16} weight="fill" className="text-green-400" />}
+                        {isTurn && <span className="chip text-green-400 border-green-500/50 text-[10px] px-2 py-0.5"><Clock size={10} weight="bold" /> TURN</span>}
                         {p.name}
                       </div>
                       {p.team_key && currentGame.teams.find((t) => t.key === p.team_key) && (

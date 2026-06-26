@@ -222,7 +222,11 @@ async def register(body: RegisterReq, response: Response):
 @api.post("/auth/login")
 async def login(body: LoginReq, request: Request, response: Response):
     email = body.email.lower()
-    ident = f"{request.client.host}:{email}"
+    # Derive real client IP behind reverse proxy / K8s ingress
+    xff = request.headers.get("x-forwarded-for", "")
+    real_ip = request.headers.get("x-real-ip", "")
+    client_ip = (xff.split(",")[0].strip() if xff else "") or real_ip or (request.client.host if request.client else "unknown")
+    ident = f"{client_ip}:{email}"
     # brute force check
     rec = await db.login_attempts.find_one({"identifier": ident})
     if rec and rec.get("locked_until"):
@@ -233,10 +237,14 @@ async def login(body: LoginReq, request: Request, response: Response):
     if not user or not verify_password(body.password, user["password_hash"]):
         attempts = (rec or {}).get("attempts", 0) + 1
         update = {"identifier": ident, "attempts": attempts}
+        locked = False
         if attempts >= 5:
             update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
             update["attempts"] = 0
+            locked = True
         await db.login_attempts.update_one({"identifier": ident}, {"$set": update}, upsert=True)
+        if locked:
+            raise HTTPException(status_code=429, detail="Too many failed attempts. Try again in 15 minutes.")
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await db.login_attempts.delete_one({"identifier": ident})
     access = create_access_token(user["id"], email)
