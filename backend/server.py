@@ -313,6 +313,30 @@ async def current_game():
     g = await get_current_game()
     return g
 
+async def _resolve_catalog(catalog_id: Optional[str], game_name: str, ranking_order: str) -> Optional[str]:
+    """Return a catalog_id. If catalog_id is provided, use it. Otherwise find an
+    existing catalog item by name (case-insensitive) or create a new one and
+    return its id."""
+    if catalog_id:
+        return catalog_id
+    if not game_name or not game_name.strip():
+        return None
+    norm = game_name.strip()
+    existing = await db.games_catalog.find_one({"name": {"$regex": f"^{norm}$", "$options": "i"}})
+    if existing:
+        return existing["id"]
+    cid = str(uuid.uuid4())
+    await db.games_catalog.insert_one({
+        "id": cid,
+        "name": norm,
+        "description": "",
+        "default_ranking": ranking_order,
+        "icon": "Dice",
+        "created_at": now_iso(),
+        "play_count": 0,
+    })
+    return cid
+
 @api.post("/game/start")
 async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
     players = []
@@ -325,11 +349,12 @@ async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
             teams.append({"key": tk, "name": t.get("name", "Team"), "totalScore": 0})
             for pname in t.get("player_names", []):
                 players.append({"key": str(uuid.uuid4()), "name": pname.strip(), "totalScore": 0, "team_key": tk, "scores": []})
+    catalog_id = await _resolve_catalog(body.catalog_id, body.game_name, body.ranking_order)
     doc = {
         "key": "current",
         "id": str(uuid.uuid4()),
         "game_name": body.game_name,
-        "catalog_id": body.catalog_id,
+        "catalog_id": catalog_id,
         "ranking_order": body.ranking_order,
         "status": "active",
         "players": players,
@@ -338,8 +363,8 @@ async def start_game(body: StartGameReq, user: dict = Depends(require_admin)):
         "started_at": now_iso(),
     }
     await db.current_game.replace_one({"key": "current"}, doc, upsert=True)
-    if body.catalog_id:
-        await db.games_catalog.update_one({"id": body.catalog_id}, {"$inc": {"play_count": 1}})
+    if catalog_id:
+        await db.games_catalog.update_one({"id": catalog_id}, {"$inc": {"play_count": 1}})
     await broadcast_current_game()
     doc.pop("_id", None)
     return doc

@@ -8,6 +8,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import Papa from "papaparse";
 import ConfirmModal from "@/components/ConfirmModal";
+import GameHistoryDetail from "@/components/GameHistoryDetail";
 
 const ICONS = { Trophy, Medal, Crown, Shield, Fire, Lightning, Star, Target };
 
@@ -201,18 +202,7 @@ export default function Stats() {
                   )}
                 </div>
                 <AnimatePresence>
-                  {expandedGame === g.id && (
-                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                      <div className="mt-3 pl-8 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {g.players.map((p, i) => (
-                          <div key={`${g.id}-${p.name}`} className="flex items-center justify-between border border-white/5 rounded-lg px-3 py-2">
-                            <span style={{ color: ROW_COLORS[i % ROW_COLORS.length] }}>{p.name}</span>
-                            <span className="font-mono-num font-bold">{p.totalScore}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
+                  {expandedGame === g.id && <GameHistoryDetail game={g} />}
                 </AnimatePresence>
               </div>
             ))}
